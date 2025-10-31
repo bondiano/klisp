@@ -53,22 +53,25 @@ class RunCommand : CliktCommand(
     private val evalExpr by option("--eval", "-e")
 
     override fun run() {
+        val env = Environment()
+
         when {
             evalExpr != null -> {
-                try {
-                    val (value, _) = parse(evalExpr!!)
-                    val result = eval(value)
-                    println(result.show())
-                } catch (e: ParseError) {
-                    echo("Parse error: ${e.message}", err = true)
-                    throw ProgramResult(1)
-                } catch (e: EvalError) {
-                    echo("Eval error: ${e.message}", err = true)
-                    throw ProgramResult(1)
-                } catch (e: Exception) {
-                    echo("Error: ${e.message}", err = true)
-                    throw ProgramResult(1)
-                }
+                parse(evalExpr!!).fold(
+                    ifLeft = { error ->
+                        echo("Parse error: ${error.message}", err = true)
+                        throw ProgramResult(1)
+                    },
+                    ifRight = { (value, _) ->
+                        eval(value, env).fold(
+                            ifLeft = { error ->
+                                echo("Eval error: ${error.message}", err = true)
+                                throw ProgramResult(1)
+                            },
+                            ifRight = { result -> println(result.show()) }
+                        )
+                    }
+                )
             }
             file != null -> {
                 try {
@@ -76,22 +79,27 @@ class RunCommand : CliktCommand(
                     var remaining = content
 
                     while (remaining.trim().isNotEmpty()) {
-                        val (value, rest) = parse(remaining)
-                        val result = eval(value)
-                        println(result.show())
-                        remaining = rest
+                        parse(remaining).fold(
+                            ifLeft = { error ->
+                                echo("Parse error: ${error.message}", err = true)
+                                throw ProgramResult(1)
+                            },
+                            ifRight = { (value, rest) ->
+                                eval(value, env).fold(
+                                    ifLeft = { error ->
+                                        echo("Eval error: ${error.message}", err = true)
+                                        throw ProgramResult(1)
+                                    },
+                                    ifRight = { result ->
+                                        println(result.show())
+                                        remaining = rest
+                                    }
+                                )
+                            }
+                        )
                     }
                 } catch (_: java.io.FileNotFoundException) {
                     echo("Error: File not found: $file", err = true)
-                    throw ProgramResult(1)
-                } catch (e: ParseError) {
-                    echo("Parse error: ${e.message}", err = true)
-                    throw ProgramResult(1)
-                } catch (e: EvalError) {
-                    echo("Eval error: ${e.message}", err = true)
-                    throw ProgramResult(1)
-                } catch (e: Exception) {
-                    echo("Error: ${e.message}", err = true)
                     throw ProgramResult(1)
                 }
             }

@@ -14,6 +14,7 @@ dependencies {
     implementation(kotlin("stdlib"))
     implementation("com.github.ajalt.clikt:clikt:5.0.1")
     implementation("org.jline:jline:3.27.1")
+    implementation("io.arrow-kt:arrow-core:2.1.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

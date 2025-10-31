@@ -1,169 +1,170 @@
+import arrow.core.Either
+import arrow.core.raise.either
+import arrow.core.raise.ensure
 import kotlin.math.pow
 
-class EvalError(message: String) : Exception(message)
+typealias EvalResult = Either<KlispError.EvalError, Value>
 
-fun eval(value: Value): Value = when (value) {
-    is Value.Integer, is Value.Float, is Value.Str, is Value.Bool, Value.Nil -> value
-    is Value.Builtin -> value
-    is Value.Lambda -> value
+fun eval(value: Value, env: Environment = Environment()): EvalResult = either {
+    when (value) {
+        is Value.Integer, is Value.Float, is Value.Str, is Value.Bool, Value.Nil -> value
+        is Value.Builtin -> value
+        is Value.Lambda -> value
+        is Value.Symbol -> env.get(value.name) ?: raise(KlispError.EvalError("Undefined symbol: ${value.name}"))
+        is Value.Cons -> {
+            if (value.head == Value.Nil && value.tail == Value.Nil) {
+                Value.Nil
+            } else {
+                val function = eval(value.head, env).bind()
+                val args = consToList(value.tail)
 
-    is Value.Symbol -> throw EvalError("Undefined symbol: ${value.name}")
-
-    is Value.Cons -> evalList(value)
-}
-
-private fun evalList(cons: Value.Cons): Value {
-    if (cons.head == Value.Nil && cons.tail == Value.Nil) {
-        return Value.Nil
-    }
-
-    val function = eval(cons.head)
-    val args = consToList(cons.tail)
-
-    return when (function) {
-        is Value.Builtin -> applyBuiltin(function.specialForm, args)
-        else -> throw EvalError("Cannot apply non-function: ${function.toPrintingString()}")
+                when (function) {
+                    is Value.Builtin -> applyBuiltin(function.specialForm, args, env).bind()
+                    else -> raise(KlispError.EvalError("Cannot apply non-function: ${function.toPrintingString()}"))
+                }
+            }
+        }
     }
 }
 
-private fun applyBuiltin(form: SpecialForm, args: List<Value>): Value = when (form) {
-    // Arithmetic operations
-    SpecialForm.ADD -> evalArithmetic(args, 0L, 0.0) { a, b -> a + b }
-    SpecialForm.SUB -> evalSub(args)
-    SpecialForm.MUL -> evalArithmetic(args, 1L, 1.0) { a, b -> a * b }
-    SpecialForm.DIV -> evalDiv(args)
-    SpecialForm.MOD -> evalMod(args)
-    SpecialForm.POW -> evalPow(args)
+private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment): EvalResult = either {
+    when (form) {
+        SpecialForm.ADD -> evalArithmetic(args, env, 0L, 0.0) { a, b -> a + b }.bind()
+        SpecialForm.SUB -> evalSub(args, env).bind()
+        SpecialForm.MUL -> evalArithmetic(args, env, 1L, 1.0) { a, b -> a * b }.bind()
+        SpecialForm.DIV -> evalDiv(args, env).bind()
+        SpecialForm.MOD -> evalMod(args, env).bind()
+        SpecialForm.POW -> evalPow(args, env).bind()
 
-    SpecialForm.EQ -> evalEq(args)
-    SpecialForm.GT -> evalComparison(args) { a, b -> a > b }
-    SpecialForm.LT -> evalComparison(args) { a, b -> a < b }
+        SpecialForm.EQ -> evalEq(args, env).bind()
+        SpecialForm.GT -> evalComparison(args, env) { a, b -> a > b }.bind()
+        SpecialForm.LT -> evalComparison(args, env) { a, b -> a < b }.bind()
 
-    SpecialForm.STR_CONCAT -> evalStrConcat(args)
+        SpecialForm.STR_CONCAT -> evalStrConcat(args, env).bind()
 
-    SpecialForm.QUOTE -> {
-        if (args.size != 1) throw EvalError("quote expects 1 argument, got ${args.size}")
-        args[0]
+        SpecialForm.QUOTE -> {
+            ensure(args.size == 1) { KlispError.EvalError("quote expects 1 argument, got ${args.size}") }
+            args[0]
+        }
+
+        SpecialForm.DEFINE -> evalDefine(args, env).bind()
+        SpecialForm.SET -> evalSet(args, env).bind()
+
+        else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
     }
-
-    else -> throw EvalError("Special form not yet implemented: ${form.toPrintingString()}")
 }
 
 private fun evalArithmetic(
     args: List<Value>,
+    env: Environment,
     intIdentity: Long,
     floatIdentity: Double,
     op: (Double, Double) -> Double
-): Value {
-    if (args.isEmpty()) {
-        return Value.Integer(intIdentity)
-    }
+): EvalResult = either {
+    if (args.isEmpty()) return@either Value.Integer(intIdentity)
 
-    val evaluated = args.map { eval(it) }
+    val evaluated = args.map { eval(it, env).bind() }
     val hasFloat = evaluated.any { it is Value.Float }
 
-    return if (hasFloat) {
+    if (hasFloat) {
         val result = evaluated.fold(floatIdentity) { acc, value ->
-            op(acc, toDouble(value))
+            op(acc, toDoubleOrRaise(value).bind())
         }
         Value.Float(result)
     } else {
         val result = evaluated.fold(intIdentity) { acc, value ->
-            op(acc.toDouble(), toDouble(value)).toLong()
+            op(acc.toDouble(), toDoubleOrRaise(value).bind()).toLong()
         }
         Value.Integer(result)
     }
 }
 
-private fun evalSub(args: List<Value>): Value {
-    if (args.isEmpty()) throw EvalError("- expects at least 1 argument")
+private fun evalSub(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.isNotEmpty()) { KlispError.EvalError("- expects at least 1 argument") }
 
-    val evaluated = args.map { eval(it) }
+    val evaluated = args.map { eval(it, env).bind() }
     val hasFloat = evaluated.any { it is Value.Float }
 
-    return if (evaluated.size == 1) {
-        if (hasFloat) {
-            Value.Float(-toDouble(evaluated[0]))
-        } else {
-            Value.Integer(-toDouble(evaluated[0]).toLong())
-        }
+    if (evaluated.size == 1) {
+        val num = toDoubleOrRaise(evaluated[0]).bind()
+        if (hasFloat) Value.Float(-num) else Value.Integer(-num.toLong())
     } else {
-        val first = toDouble(evaluated[0])
+        val first = toDoubleOrRaise(evaluated[0]).bind()
         val result = evaluated.drop(1).fold(first) { acc, value ->
-            acc - toDouble(value)
+            acc - toDoubleOrRaise(value).bind()
         }
         if (hasFloat) Value.Float(result) else Value.Integer(result.toLong())
     }
 }
 
-private fun evalDiv(args: List<Value>): Value {
-    if (args.isEmpty()) throw EvalError("/ expects at least 1 argument")
+private fun evalDiv(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.isNotEmpty()) { KlispError.EvalError("/ expects at least 1 argument") }
 
-    val evaluated = args.map { eval(it) }
+    val evaluated = args.map { eval(it, env).bind() }
 
-    return if (evaluated.size == 1) {
-        val value = toDouble(evaluated[0])
-        if (value == 0.0) throw EvalError("Division by zero")
-        Value.Float(1.0 / value)
+    if (evaluated.size == 1) {
+        val num = toDoubleOrRaise(evaluated[0]).bind()
+        ensure(num != 0.0) { KlispError.EvalError("Division by zero") }
+        Value.Float(1.0 / num)
     } else {
-        val first = toDouble(evaluated[0])
+        val first = toDoubleOrRaise(evaluated[0]).bind()
         val result = evaluated.drop(1).fold(first) { acc, value ->
-            val divisor = toDouble(value)
-            if (divisor == 0.0) throw EvalError("Division by zero")
+            val divisor = toDoubleOrRaise(value).bind()
+            ensure(divisor != 0.0) { KlispError.EvalError("Division by zero") }
             acc / divisor
         }
         Value.Float(result)
     }
 }
 
-private fun evalMod(args: List<Value>): Value {
-    if (args.size != 2) throw EvalError("% expects exactly 2 arguments, got ${args.size}")
+private fun evalMod(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("% expects exactly 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it) }
-    val a = toLong(evaluated[0])
-    val b = toLong(evaluated[1])
+    val evaluated = args.map { eval(it, env).bind() }
+    val a = toLongOrRaise(evaluated[0]).bind()
+    val b = toLongOrRaise(evaluated[1]).bind()
 
-    if (b == 0L) throw EvalError("Modulo by zero")
-    return Value.Integer(a % b)
+    ensure(b != 0L) { KlispError.EvalError("Modulo by zero") }
+    Value.Integer(a % b)
 }
 
-private fun evalPow(args: List<Value>): Value {
-    if (args.size != 2) throw EvalError("^ expects exactly 2 arguments, got ${args.size}")
+private fun evalPow(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("^ expects exactly 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it) }
-    val base = toDouble(evaluated[0])
-    val exponent = toDouble(evaluated[1])
+    val evaluated = args.map { eval(it, env).bind() }
+    val base = toDoubleOrRaise(evaluated[0]).bind()
+    val exponent = toDoubleOrRaise(evaluated[1]).bind()
 
-    return Value.Float(base.pow(exponent))
+    Value.Float(base.pow(exponent))
 }
 
-private fun evalEq(args: List<Value>): Value {
-    if (args.size < 2) throw EvalError("= expects at least 2 arguments, got ${args.size}")
+private fun evalEq(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size >= 2) { KlispError.EvalError("= expects at least 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it) }
+    val evaluated = args.map { eval(it, env).bind() }
     val first = evaluated[0]
 
     val allEqual = evaluated.drop(1).all { compareValues(first, it) }
-    return Value.Bool(allEqual)
+    Value.Bool(allEqual)
 }
 
-private fun evalComparison(args: List<Value>, cmp: (Double, Double) -> Boolean): Value {
-    if (args.size < 2) throw EvalError("Comparison expects at least 2 arguments, got ${args.size}")
+private fun evalComparison(args: List<Value>, env: Environment, cmp: (Double, Double) -> Boolean): EvalResult = either {
+    ensure(args.size >= 2) { KlispError.EvalError("Comparison expects at least 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it) }
+    val evaluated = args.map { eval(it, env).bind() }
 
     for (i in 0 until evaluated.size - 1) {
-        val a = toDouble(evaluated[i])
-        val b = toDouble(evaluated[i + 1])
+        val a = toDoubleOrRaise(evaluated[i]).bind()
+        val b = toDoubleOrRaise(evaluated[i + 1]).bind()
         if (!cmp(a, b)) {
-            return Value.Bool(false)
+            return@either Value.Bool(false)
         }
     }
-    return Value.Bool(true)
+    Value.Bool(true)
 }
 
-private fun evalStrConcat(args: List<Value>): Value {
-    val evaluated = args.map { eval(it) }
+private fun evalStrConcat(args: List<Value>, env: Environment): EvalResult = either {
+    val evaluated = args.map { eval(it, env).bind() }
     val result = evaluated.joinToString("") { value ->
         when (value) {
             is Value.Str -> value.text
@@ -173,7 +174,33 @@ private fun evalStrConcat(args: List<Value>): Value {
             else -> value.toPrintingString()
         }
     }
-    return Value.Str(result)
+    Value.Str(result)
+}
+
+private fun evalDefine(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("define expects exactly 2 arguments, got ${args.size}") }
+
+    val name = when (val nameValue = args[0]) {
+        is Value.Symbol -> nameValue.name
+        else -> raise(KlispError.EvalError("define expects symbol as first argument, got ${nameValue.toPrintingString()}"))
+    }
+
+    val value = eval(args[1], env).bind()
+    env.define(name, value)
+    value
+}
+
+private fun evalSet(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("set! expects exactly 2 arguments, got ${args.size}") }
+
+    val name = when (val nameValue = args[0]) {
+        is Value.Symbol -> nameValue.name
+        else -> raise(KlispError.EvalError("set! expects symbol as first argument, got ${nameValue.toPrintingString()}"))
+    }
+
+    val value = eval(args[1], env).bind()
+    env.set(name, value).bind()
+    value
 }
 
 private fun consToList(value: Value): List<Value> {
@@ -185,22 +212,23 @@ private fun consToList(value: Value): List<Value> {
         current = current.tail
     }
 
-    if (current != Value.Nil) {
-        throw EvalError("Improper list in function application")
-    }
-
+    require(current == Value.Nil) { "Improper list in function application" }
     return result
 }
 
-private fun toDouble(value: Value): Double = when (value) {
-    is Value.Integer -> value.value.toDouble()
-    is Value.Float -> value.value
-    else -> throw EvalError("Expected number, got ${value.toPrintingString()}")
+private fun toDoubleOrRaise(value: Value): Either<KlispError.EvalError, Double> = either {
+    when (value) {
+        is Value.Integer -> value.value.toDouble()
+        is Value.Float -> value.value
+        else -> raise(KlispError.EvalError("Expected number, got ${value.toPrintingString()}"))
+    }
 }
 
-private fun toLong(value: Value): Long = when (value) {
-    is Value.Integer -> value.value
-    else -> throw EvalError("Expected integer, got ${value.toPrintingString()}")
+private fun toLongOrRaise(value: Value): Either<KlispError.EvalError, Long> = either {
+    when (value) {
+        is Value.Integer -> value.value
+        else -> raise(KlispError.EvalError("Expected integer, got ${value.toPrintingString()}"))
+    }
 }
 
 private fun compareValues(a: Value, b: Value): Boolean = when (a) {
@@ -209,11 +237,13 @@ private fun compareValues(a: Value, b: Value): Boolean = when (a) {
         is Value.Float -> a.value.toDouble() == b.value
         else -> false
     }
+
     is Value.Float -> when (b) {
         is Value.Integer -> a.value == b.value.toDouble()
         is Value.Float -> a.value == b.value
         else -> false
     }
+
     is Value.Str -> b is Value.Str && a.text == b.text
     is Value.Bool -> b is Value.Bool && a.value == b.value
     Value.Nil -> b == Value.Nil

@@ -1,34 +1,35 @@
-class ParseError(message: String) : Exception(message)
+import arrow.core.Either
+import arrow.core.raise.either
+import arrow.core.raise.ensure
 
-fun parse(input: String): Pair<Value, String> {
+typealias ParseResult = Either<KlispError.ParseError, Pair<Value, String>>
+
+fun parse(input: String): ParseResult = either {
     val cleanInput = skipWhiteSpacesAndComments(input)
-    return when {
-        cleanInput.isEmpty() -> throw ParseError("Unexpected end of input")
-        cleanInput.startsWith("\"") -> parseString(cleanInput)
-        cleanInput.startsWith("(") -> parseList(cleanInput.drop(1))
+    ensure(cleanInput.isNotEmpty()) { KlispError.ParseError("Unexpected end of input") }
+
+    when {
+        cleanInput.startsWith("\"") -> parseString(cleanInput).bind()
+        cleanInput.startsWith("(") -> parseList(cleanInput.drop(1)).bind()
         cleanInput.startsWith("'") -> {
-            val (quotedValue, rest) = parse(cleanInput.drop(1))
+            val (quotedValue, rest) = parse(cleanInput.drop(1)).bind()
             Value.Cons(Value.Builtin(SpecialForm.QUOTE), Value.Cons(quotedValue, Value.Nil)) to rest
         }
-
-        else -> parseAtom(cleanInput)
+        else -> parseAtom(cleanInput).bind()
     }
 }
 
-private fun parseString(input: String): Pair<Value, String> {
-    if (!input.startsWith("\"")) {
-        throw ParseError("Expected string to start with \"")
-    }
+private fun parseString(input: String): ParseResult = either {
+    ensure(input.startsWith("\"")) { KlispError.ParseError("Expected string to start with \"") }
 
     val content = StringBuilder()
-    var i = 1  // Skip opening quote
+    var i = 1
     var escaped = false
 
     while (i < input.length) {
         val char = input[i]
 
         if (escaped) {
-            // Handle escape sequences
             when (char) {
                 'n' -> content.append('\n')
                 't' -> content.append('\t')
@@ -44,43 +45,44 @@ private fun parseString(input: String): Pair<Value, String> {
         } else {
             when (char) {
                 '\\' -> escaped = true
-                '"' -> {
-                    // End of string
-                    return Value.Str(content.toString()) to input.drop(i + 1)
-                }
+                '"' -> return@either Value.Str(content.toString()) to input.drop(i + 1)
                 else -> content.append(char)
             }
         }
         i++
     }
 
-    throw ParseError("Unterminated string literal")
+    raise(KlispError.ParseError("Unterminated string literal"))
 }
 
-private fun parseAtom(input: String): Pair<Value, String> {
+private fun parseAtom(input: String): ParseResult = either {
     val atomString = takeUntilDelimiter(input)
     val rest = input.drop(atomString.length)
 
-    if (atomString.isEmpty()) throw ParseError("Unexpected end of atom for input: $input")
+    ensure(atomString.isNotEmpty()) {
+        KlispError.ParseError("Unexpected end of atom for input: $input")
+    }
 
-    return Value.fromString(atomString) to rest
+    Value.fromString(atomString) to rest
 }
 
-private fun parseList(input: String): Pair<Value, String> {
+private fun parseList(input: String): ParseResult = either {
     var rest = skipWhiteSpacesAndComments(input)
     val items = mutableListOf<Value>()
 
     while (rest.isNotEmpty() && rest.first() != ')') {
-        val (item, itemRest) = parse(rest)
+        val (item, itemRest) = parse(rest).bind()
         items.add(item)
         rest = skipWhiteSpacesAndComments(itemRest)
     }
 
-    if (rest.isEmpty()) throw ParseError("Unexpected end of input, expected ')'")
+    ensure(rest.isNotEmpty()) { KlispError.ParseError("Unexpected end of input, expected ')'") }
 
-    return items.foldRight(Value.Nil as Value) { item, acc ->
+    val result = items.foldRight(Value.Nil as Value) { item, acc ->
         Value.Cons(item, acc)
-    } to rest.drop(1)
+    }
+
+    result to rest.drop(1)
 }
 
 private fun skipWhiteSpacesAndComments(input: String): String {
@@ -92,7 +94,6 @@ private fun skipWhiteSpacesAndComments(input: String): String {
                 rest = rest.dropWhile { it != '\n' }
                 if (rest.isNotEmpty()) rest = rest.drop(1)
             }
-
             else -> break
         }
     }

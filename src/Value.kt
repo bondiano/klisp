@@ -27,7 +27,7 @@ enum class SpecialForm {
             "macro" -> MACRO
             "expand-macro" -> EXPAND_MACRO
             "quote" -> QUOTE
-            "define" -> DEFINE
+            "def" -> DEFINE
             "symbol" -> SYMBOL
             "car" -> CAR
             "cdr" -> CDR
@@ -61,18 +61,13 @@ fun SpecialForm.toPrintingString(): String = when (this) {
     SpecialForm.MACRO -> "macro"
     SpecialForm.EXPAND_MACRO -> "expand-macro"
     SpecialForm.QUOTE -> "quote"
-    SpecialForm.DEFINE -> "define"
+    SpecialForm.DEFINE -> "def"
     SpecialForm.SYMBOL -> "symbol"
     SpecialForm.CAR -> "car"
     SpecialForm.CDR -> "cdr"
     SpecialForm.CONS -> "cons"
     SpecialForm.TYPE_OF -> "type-of"
     SpecialForm.EVAL -> "eval"
-}
-
-fun SpecialForm.isBinaryOperator(): Boolean = when (this) {
-    SpecialForm.ADD, SpecialForm.SUB, SpecialForm.MUL, SpecialForm.DIV, SpecialForm.MOD, SpecialForm.EQ, SpecialForm.GT, SpecialForm.LT -> true
-    else -> false
 }
 
 sealed class Value {

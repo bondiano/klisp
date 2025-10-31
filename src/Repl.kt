@@ -7,6 +7,7 @@ import java.nio.file.Paths
 
 class Repl {
     private val historyFile = getHistoryFile()
+    private val env = Environment()
 
     fun start() {
         val terminal = TerminalBuilder.builder()
@@ -57,19 +58,18 @@ class Repl {
                         }
                     }
 
-                    try {
-                        val (value, _) = parse(input)
-                        val evaluated = eval(value)
-                        val result = evaluated.show()
-                        println("=> $result")
-                        lineNumber++
-                    } catch (e: ParseError) {
-                        println("Parse error: ${e.message}")
-                    } catch (e: EvalError) {
-                        println("Eval error: ${e.message}")
-                    } catch (e: Exception) {
-                        println("Error: ${e.message}")
-                    }
+                    parse(input).fold(
+                        ifLeft = { error -> println("Parse error: ${error.message}") },
+                        ifRight = { (value, _) ->
+                            eval(value, env).fold(
+                                ifLeft = { error -> println("Eval error: ${error.message}") },
+                                ifRight = { result ->
+                                    println("=> ${result.show()}")
+                                    lineNumber++
+                                }
+                            )
+                        }
+                    )
                 } catch (_: UserInterruptException) {
                     println()
                     continue
