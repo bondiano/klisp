@@ -1,0 +1,12 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JAR_FILE="$SCRIPT_DIR/build/libs/klisp-1.0.0.jar"
+
+if [ ! -f "$JAR_FILE" ]; then
+    echo "Error: JAR file not found. Building..."
+    cd "$SCRIPT_DIR"
+    ./gradlew jar --console=plain -q
+fi
+
+exec java -jar "$JAR_FILE" "$@"
