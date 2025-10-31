@@ -59,11 +59,14 @@ class Repl {
 
                     try {
                         val (value, _) = parse(input)
-                        val result = value.show()
+                        val evaluated = eval(value)
+                        val result = evaluated.show()
                         println("=> $result")
                         lineNumber++
                     } catch (e: ParseError) {
                         println("Parse error: ${e.message}")
+                    } catch (e: EvalError) {
+                        println("Eval error: ${e.message}")
                     } catch (e: Exception) {
                         println("Error: ${e.message}")
                     }

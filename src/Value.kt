@@ -6,16 +6,16 @@ enum class SpecialForm {
 
     companion object {
         fun fromString(value: String): SpecialForm? = when (value) {
-            "add" -> ADD
-            "sub" -> SUB
-            "mul" -> MUL
-            "div" -> DIV
-            "mod" -> MOD
-            "eq" -> EQ
-            "gt" -> GT
-            "lt" -> LT
-            "pow" -> POW
-            "strConcat" -> STR_CONCAT
+            "+" -> ADD
+            "-" -> SUB
+            "*" -> MUL
+            "/" -> DIV
+            "%" -> MOD
+            "=" -> EQ
+            ">" -> GT
+            "<" -> LT
+            "^" -> POW
+            "++" -> STR_CONCAT
             "if" -> IF
             "set!" -> SET
             "print" -> PRINT
@@ -40,16 +40,16 @@ enum class SpecialForm {
 }
 
 fun SpecialForm.toPrintingString(): String = when (this) {
-    SpecialForm.ADD -> "add"
-    SpecialForm.SUB -> "sub"
-    SpecialForm.MUL -> "mul"
-    SpecialForm.DIV -> "div"
-    SpecialForm.MOD -> "mod"
-    SpecialForm.EQ -> "eq"
-    SpecialForm.GT -> "gt"
-    SpecialForm.LT -> "lt"
-    SpecialForm.POW -> "pow"
-    SpecialForm.STR_CONCAT -> "strConcat"
+    SpecialForm.ADD -> "+"
+    SpecialForm.SUB -> "-"
+    SpecialForm.MUL -> "*"
+    SpecialForm.DIV -> "/"
+    SpecialForm.MOD -> "%"
+    SpecialForm.EQ -> "="
+    SpecialForm.GT -> ">"
+    SpecialForm.LT -> "<"
+    SpecialForm.POW -> "^"
+    SpecialForm.STR_CONCAT -> "++"
     SpecialForm.IF -> "if"
     SpecialForm.SET -> "set!"
     SpecialForm.PRINT -> "print"
@@ -91,7 +91,6 @@ sealed class Value {
             value == "nil" -> Nil
             value.toLongOrNull() != null -> Integer(value.toLong())
             value.toDoubleOrNull() != null -> Float(value.toDouble())
-            value.startsWith("\"") && value.endsWith("\"") -> Str(value.substring(1, value.length - 1))
             value.equals("true", ignoreCase = true) -> Bool(true)
             value.equals("false", ignoreCase = true) -> Bool(false)
             SpecialForm.fromString(value) != null -> Builtin(SpecialForm.fromString(value)!!)

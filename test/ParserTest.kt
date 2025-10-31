@@ -190,10 +190,10 @@ class ParserTest {
 
         @ParameterizedTest
         @CsvSource(
-            "add, ADD",
-            "sub, SUB",
-            "mul, MUL",
-            "div, DIV",
+            "+, ADD",
+            "-, SUB",
+            "*, MUL",
+            "/, DIV",
             "if, IF",
             "lambda, LAMBDA",
             "define, DEFINE",
@@ -332,7 +332,7 @@ class ParserTest {
 
         @Test
         fun `should parse complex expression`() {
-            val (value, rest) = parse("(add 1 (mul 2 3))")
+            val (value, rest) = parse("(+ 1 (* 2 3))")
 
             val innerExpr = Value.Cons(
                 Value.Builtin(SpecialForm.MUL),
@@ -355,7 +355,7 @@ class ParserTest {
 
         @Test
         fun `should parse lambda definition`() {
-            val (value, rest) = parse("(lambda (x y) (add x y))")
+            val (value, rest) = parse("(lambda (x y) (+ x y))")
 
             val params = Value.Cons(
                 Value.Symbol("x"),
@@ -447,12 +447,12 @@ class ParserTest {
             val (value, rest) = parse("(+ - * /)")
 
             val expected = Value.Cons(
-                Value.Symbol("+"),
+                Value.Builtin(SpecialForm.ADD),
                 Value.Cons(
-                    Value.Symbol("-"),
+                    Value.Builtin(SpecialForm.SUB),
                     Value.Cons(
-                        Value.Symbol("*"),
-                        Value.Cons(Value.Symbol("/"), Value.Nil)
+                        Value.Builtin(SpecialForm.MUL),
+                        Value.Cons(Value.Builtin(SpecialForm.DIV), Value.Nil)
                     )
                 )
             )

@@ -8,6 +8,9 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ProgramResult
 import java.io.File
 
+/**
+ * Main CLI command for klisp
+ */
 class Klisp : CliktCommand(
     name = "klisp"
 ) {
@@ -18,6 +21,7 @@ class Klisp : CliktCommand(
     override fun help(context: Context) = "A Lisp interpreter written in Kotlin"
 
     override fun run() {
+        // If no subcommand is provided, show help
         if (currentContext.invokedSubcommand == null) {
             echo(currentContext.command.getFormattedHelp())
         }
@@ -46,23 +50,26 @@ class RunCommand : CliktCommand(
     override fun help(context: Context) = "Run a klisp file"
 
     private val file by argument().optional()
-    private val eval by option("--eval", "-e")
+    private val evalExpr by option("--eval", "-e")
 
     override fun run() {
         when {
-            eval != null -> {
+            evalExpr != null -> {
                 try {
-                    val (value, _) = parse(eval!!)
-                    println(value.show())
+                    val (value, _) = parse(evalExpr!!)
+                    val result = eval(value)
+                    println(result.show())
                 } catch (e: ParseError) {
                     echo("Parse error: ${e.message}", err = true)
+                    throw ProgramResult(1)
+                } catch (e: EvalError) {
+                    echo("Eval error: ${e.message}", err = true)
                     throw ProgramResult(1)
                 } catch (e: Exception) {
                     echo("Error: ${e.message}", err = true)
                     throw ProgramResult(1)
                 }
             }
-
             file != null -> {
                 try {
                     val content = File(file!!).readText()
@@ -70,7 +77,8 @@ class RunCommand : CliktCommand(
 
                     while (remaining.trim().isNotEmpty()) {
                         val (value, rest) = parse(remaining)
-                        println(value.show())
+                        val result = eval(value)
+                        println(result.show())
                         remaining = rest
                     }
                 } catch (_: java.io.FileNotFoundException) {
@@ -79,12 +87,14 @@ class RunCommand : CliktCommand(
                 } catch (e: ParseError) {
                     echo("Parse error: ${e.message}", err = true)
                     throw ProgramResult(1)
+                } catch (e: EvalError) {
+                    echo("Eval error: ${e.message}", err = true)
+                    throw ProgramResult(1)
                 } catch (e: Exception) {
                     echo("Error: ${e.message}", err = true)
                     throw ProgramResult(1)
                 }
             }
-
             else -> {
                 echo("Error: Either provide a file path or use --eval", err = true)
                 throw ProgramResult(1)

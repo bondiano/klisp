@@ -4,6 +4,7 @@ fun parse(input: String): Pair<Value, String> {
     val cleanInput = skipWhiteSpacesAndComments(input)
     return when {
         cleanInput.isEmpty() -> throw ParseError("Unexpected end of input")
+        cleanInput.startsWith("\"") -> parseString(cleanInput)
         cleanInput.startsWith("(") -> parseList(cleanInput.drop(1))
         cleanInput.startsWith("'") -> {
             val (quotedValue, rest) = parse(cleanInput.drop(1))
@@ -12,6 +13,48 @@ fun parse(input: String): Pair<Value, String> {
 
         else -> parseAtom(cleanInput)
     }
+}
+
+private fun parseString(input: String): Pair<Value, String> {
+    if (!input.startsWith("\"")) {
+        throw ParseError("Expected string to start with \"")
+    }
+
+    val content = StringBuilder()
+    var i = 1  // Skip opening quote
+    var escaped = false
+
+    while (i < input.length) {
+        val char = input[i]
+
+        if (escaped) {
+            // Handle escape sequences
+            when (char) {
+                'n' -> content.append('\n')
+                't' -> content.append('\t')
+                'r' -> content.append('\r')
+                '\\' -> content.append('\\')
+                '"' -> content.append('"')
+                else -> {
+                    content.append('\\')
+                    content.append(char)
+                }
+            }
+            escaped = false
+        } else {
+            when (char) {
+                '\\' -> escaped = true
+                '"' -> {
+                    // End of string
+                    return Value.Str(content.toString()) to input.drop(i + 1)
+                }
+                else -> content.append(char)
+            }
+        }
+        i++
+    }
+
+    throw ParseError("Unterminated string literal")
 }
 
 private fun parseAtom(input: String): Pair<Value, String> {
@@ -56,7 +99,7 @@ private fun skipWhiteSpacesAndComments(input: String): String {
     return rest
 }
 
-private val delimiters = setOf('(', ')', ' ', '\n', '\t', '"', ';', '\'', '`', ',')
+private val delimiters = setOf('(', ')', ' ', '\n', '\t', ';', '\'', '`', ',')
 
 private fun takeUntilDelimiter(input: String): String =
     input.takeWhile { it !in delimiters }
