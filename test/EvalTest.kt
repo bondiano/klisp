@@ -229,6 +229,98 @@ class EvalTest {
     }
 
     @Nested
+    inner class MacroTests {
+        @Test
+        fun `simple identity macro`() {
+            val env = Environment()
+            evalString("(def id (macro (x) x))", env)
+            assertEquals(Value.Integer(42), evalString("(id 42)", env))
+        }
+
+        @Test
+        fun `macro transforms code`() {
+            val env = Environment()
+            evalString("(def unless (macro (cond then else) (if cond else then)))", env)
+            // (unless false 1 2) expands to (if false 2 1) => 1 (else branch)
+            assertEquals(Value.Integer(1), evalString("(unless false 1 2)", env))
+            assertEquals(Value.Integer(2), evalString("(unless true 1 2)", env))
+        }
+
+        @Test
+        fun `expand-macro shows expansion`() {
+            val env = Environment()
+            evalString("(def id (macro (x) x))", env)
+            val result = evalString("(expand-macro (id 42))", env)
+            assertEquals(Value.Integer(42), result)
+        }
+
+        @Test
+        fun `macro with variadic params`() {
+            val env = Environment()
+            // Macro that takes first arg and ignores rest
+            evalString("(def first-arg (macro (x . rest) x))", env)
+            assertEquals(Value.Integer(1), evalString("(first-arg 1 2 3)", env))
+        }
+
+        @Test
+        fun `nested macro expansion`() {
+            val env = Environment()
+            evalString("(def id (macro (x) x))", env)
+            evalString("(def wrap (macro (x) (id x)))", env)
+            assertEquals(Value.Integer(42), evalString("(wrap 42)", env))
+        }
+    }
+
+    @Nested
+    inner class EvalFormTests {
+        @Test
+        fun `eval quoted expression`() {
+            val env = Environment()
+            assertEquals(Value.Integer(3), evalString("(eval '(+ 1 2))", env))
+        }
+
+        @Test
+        fun `eval with variables`() {
+            val env = Environment()
+            evalString("(def x 10)", env)
+            evalString("(def code '(+ x 5))", env)
+            assertEquals(Value.Integer(15), evalString("(eval code)", env))
+        }
+
+        @Test
+        fun `eval constructs code dynamically`() {
+            val env = Environment()
+            evalString("(def x 10)", env)
+            // Build code at runtime: (+ x x)
+            assertEquals(Value.Integer(20), evalString("(eval '(+ x x))", env))
+        }
+    }
+
+    @Nested
+    inner class RaiseTests {
+        @Test
+        fun `raise with string`() {
+            val parseResult = parse("(raise \"custom error\")")
+            assertTrue(parseResult.isRight())
+
+            val (value, _) = parseResult.getOrNull()!!
+            val evalResult = eval(value, Environment())
+
+            assertTrue(evalResult.isLeft())
+            val error = evalResult.leftOrNull()
+            assertTrue(error is KlispError.RuntimeError)
+            assertEquals("custom error", error?.message)
+        }
+
+        @Test
+        fun `raise with number`() {
+            val result = eval(parse("(raise 404)").getOrNull()!!.first, Environment())
+            assertTrue(result.isLeft())
+            assertTrue(result.leftOrNull() is KlispError.RuntimeError)
+        }
+    }
+
+    @Nested
     inner class ErrorTests {
         @Test
         fun `undefined symbol`() {

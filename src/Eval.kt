@@ -3,19 +3,26 @@ import arrow.core.raise.either
 import arrow.core.raise.ensure
 import kotlin.math.pow
 
-typealias EvalResult = Either<KlispError.EvalError, Value>
+typealias EvalResult = Either<KlispError, Value>
 
 fun eval(value: Value, env: Environment = Environment()): EvalResult = either {
+    val expanded = expand(value, env).bind()
+
+    evalExpanded(expanded, env).bind()
+}
+
+private fun evalExpanded(value: Value, env: Environment): EvalResult = either {
     when (value) {
         is Value.Integer, is Value.Float, is Value.Str, is Value.Bool, Value.Nil -> value
         is Value.Builtin -> value
         is Value.Lambda -> value
+        is Value.Macro -> value
         is Value.Symbol -> env.get(value.name) ?: raise(KlispError.EvalError("Undefined symbol: ${value.name}"))
         is Value.Cons -> {
             if (value.head == Value.Nil && value.tail == Value.Nil) {
                 Value.Nil
             } else {
-                val function = eval(value.head, env).bind()
+                val function = evalExpanded(value.head, env).bind()
                 val args = consToList(value.tail)
 
                 when (function) {
@@ -48,11 +55,50 @@ private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment)
             args[0]
         }
 
+        SpecialForm.IF -> evalIf(args, env).bind()
         SpecialForm.DEFINE -> evalDefine(args, env).bind()
         SpecialForm.SET -> evalSet(args, env).bind()
         SpecialForm.LAMBDA -> evalLambda(args, env).bind()
+        SpecialForm.MACRO -> evalMacro(args).bind()
+        SpecialForm.EXPAND_MACRO -> evalExpandMacro(args, env).bind()
+        SpecialForm.EVAL -> evalEvalForm(args, env).bind()
+        SpecialForm.RAISE -> evalRaise(args, env).bind()
 
         else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
+    }
+}
+
+private fun evalEvalForm(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("eval expects exactly 1 argument, got ${args.size}") }
+
+    val code = evalExpanded(args[0], env).bind()
+    eval(code, env).bind()
+}
+
+private fun evalRaise(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("raise expects exactly 1 argument, got ${args.size}") }
+
+    val errorValue = evalExpanded(args[0], env).bind()
+    raise(KlispError.RuntimeError(errorValue.toPrintingString()))
+}
+
+private fun evalIf(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size in 2..3) {
+        KlispError.EvalError("if expects 2 or 3 arguments, got ${args.size}")
+    }
+
+    val isTruthy = when (val condition = evalExpanded(args[0], env).bind()) {
+        is Value.Bool -> condition.value
+        Value.Nil -> false
+        else -> true
+    }
+
+    if (isTruthy) {
+        evalExpanded(args[1], env).bind()
+    } else if (args.size == 3) {
+        evalExpanded(args[2], env).bind()
+    } else {
+        Value.Nil
     }
 }
 
@@ -123,14 +169,14 @@ private fun applyLambda(lambda: Value.Lambda, args: List<Value>, env: Environmen
     val lambdaEnv = lambda.capturedEnv.createChild()
 
     lambda.parameters.take(minArgs).zip(args.take(minArgs)).forEach { (param, arg) ->
-        val evaluatedArg = eval(arg, env).bind()
+        val evaluatedArg = evalExpanded(arg, env).bind()
         lambdaEnv.define(param.name, evaluatedArg)
     }
 
     lambda.variadicParam?.let { varParam ->
         val restArgs = args.drop(minArgs)
         val restList = restArgs.foldRight(Value.Nil as Value) { arg, acc ->
-            val evaluatedArg = eval(arg, env).bind()
+            val evaluatedArg = evalExpanded(arg, env).bind()
             Value.Cons(evaluatedArg, acc)
         }
         lambdaEnv.define(varParam.name, restList)
@@ -148,7 +194,7 @@ private fun evalArithmetic(
 ): EvalResult = either {
     if (args.isEmpty()) return@either Value.Integer(intIdentity)
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
     val hasFloat = evaluated.any { it is Value.Float }
 
     if (hasFloat) {
@@ -167,7 +213,7 @@ private fun evalArithmetic(
 private fun evalSub(args: List<Value>, env: Environment): EvalResult = either {
     ensure(args.isNotEmpty()) { KlispError.EvalError("- expects at least 1 argument") }
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
     val hasFloat = evaluated.any { it is Value.Float }
 
     if (evaluated.size == 1) {
@@ -185,7 +231,7 @@ private fun evalSub(args: List<Value>, env: Environment): EvalResult = either {
 private fun evalDiv(args: List<Value>, env: Environment): EvalResult = either {
     ensure(args.isNotEmpty()) { KlispError.EvalError("/ expects at least 1 argument") }
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
 
     if (evaluated.size == 1) {
         val num = toDoubleOrRaise(evaluated[0]).bind()
@@ -205,7 +251,7 @@ private fun evalDiv(args: List<Value>, env: Environment): EvalResult = either {
 private fun evalMod(args: List<Value>, env: Environment): EvalResult = either {
     ensure(args.size == 2) { KlispError.EvalError("% expects exactly 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
     val a = toLongOrRaise(evaluated[0]).bind()
     val b = toLongOrRaise(evaluated[1]).bind()
 
@@ -216,7 +262,7 @@ private fun evalMod(args: List<Value>, env: Environment): EvalResult = either {
 private fun evalPow(args: List<Value>, env: Environment): EvalResult = either {
     ensure(args.size == 2) { KlispError.EvalError("^ expects exactly 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
     val base = toDoubleOrRaise(evaluated[0]).bind()
     val exponent = toDoubleOrRaise(evaluated[1]).bind()
 
@@ -226,7 +272,7 @@ private fun evalPow(args: List<Value>, env: Environment): EvalResult = either {
 private fun evalEq(args: List<Value>, env: Environment): EvalResult = either {
     ensure(args.size >= 2) { KlispError.EvalError("= expects at least 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
     val first = evaluated[0]
 
     val allEqual = evaluated.drop(1).all { compareValues(first, it) }
@@ -236,7 +282,7 @@ private fun evalEq(args: List<Value>, env: Environment): EvalResult = either {
 private fun evalComparison(args: List<Value>, env: Environment, cmp: (Double, Double) -> Boolean): EvalResult = either {
     ensure(args.size >= 2) { KlispError.EvalError("Comparison expects at least 2 arguments, got ${args.size}") }
 
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
 
     for (i in 0 until evaluated.size - 1) {
         val a = toDoubleOrRaise(evaluated[i]).bind()
@@ -249,7 +295,7 @@ private fun evalComparison(args: List<Value>, env: Environment, cmp: (Double, Do
 }
 
 private fun evalStrConcat(args: List<Value>, env: Environment): EvalResult = either {
-    val evaluated = args.map { eval(it, env).bind() }
+    val evaluated = args.map { evalExpanded(it, env).bind() }
     val result = evaluated.joinToString("") { value ->
         when (value) {
             is Value.Str -> value.text
@@ -262,6 +308,26 @@ private fun evalStrConcat(args: List<Value>, env: Environment): EvalResult = eit
     Value.Str(result)
 }
 
+private fun evalMacro(args: List<Value>): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("macro expects exactly 2 arguments, got ${args.size}") }
+
+    val (params, variadicParam) = when (val paramList = args[0]) {
+        is Value.Cons -> parseParameters(paramList).bind()
+        Value.Nil -> emptyList<Value.Symbol>() to null
+        else -> raise(KlispError.EvalError("macro expects parameter list, got ${paramList.toPrintingString()}"))
+    }
+
+    val body = args[1]
+
+    Value.Macro(params, variadicParam, body)
+}
+
+private fun evalExpandMacro(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("expand-macro expects exactly 1 argument, got ${args.size}") }
+
+    expand(args[0], env).bind()
+}
+
 private fun evalDefine(args: List<Value>, env: Environment): EvalResult = either {
     ensure(args.size == 2) { KlispError.EvalError("define expects exactly 2 arguments, got ${args.size}") }
 
@@ -270,7 +336,7 @@ private fun evalDefine(args: List<Value>, env: Environment): EvalResult = either
         else -> raise(KlispError.EvalError("define expects symbol as first argument, got ${nameValue.toPrintingString()}"))
     }
 
-    val value = eval(args[1], env).bind()
+    val value = evalExpanded(args[1], env).bind()
     env.define(name, value)
     value
 }

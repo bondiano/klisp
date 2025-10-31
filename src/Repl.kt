@@ -48,10 +48,12 @@ class Repl {
                             println("Goodbye!")
                             break
                         }
+
                         ":help" -> {
                             printHelp()
                             continue
                         }
+
                         ":history" -> {
                             printHistory(history)
                             continue
@@ -59,10 +61,18 @@ class Repl {
                     }
 
                     parse(input).fold(
-                        ifLeft = { error -> println("Parse error: ${error.message}") },
+                        ifLeft = { error ->
+                            println("Parse error: ${error.message}")
+                        },
                         ifRight = { (value, _) ->
                             eval(value, env).fold(
-                                ifLeft = { error -> println("Eval error: ${error.message}") },
+                                ifLeft = { error ->
+                                    when (error) {
+                                        is KlispError.EvalError -> println("Eval error: ${error.message}")
+                                        is KlispError.RuntimeError -> println("Runtime error: ${error.message}")
+                                        else -> println("Error: ${error.message}")
+                                    }
+                                },
                                 ifRight = { result ->
                                     println("=> ${result.show()}")
                                     lineNumber++

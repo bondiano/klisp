@@ -59,13 +59,13 @@ class RunCommand : CliktCommand(
             evalExpr != null -> {
                 parse(evalExpr!!).fold(
                     ifLeft = { error ->
-                        echo("Parse error: ${error.message}", err = true)
+                        echo("${errorType(error)}: ${error.message}", err = true)
                         throw ProgramResult(1)
                     },
                     ifRight = { (value, _) ->
                         eval(value, env).fold(
                             ifLeft = { error ->
-                                echo("Eval error: ${error.message}", err = true)
+                                echo("${errorType(error)}: ${error.message}", err = true)
                                 throw ProgramResult(1)
                             },
                             ifRight = { result -> println(result.show()) }
@@ -91,13 +91,13 @@ class RunCommand : CliktCommand(
             while (remaining.trim().isNotEmpty()) {
                 parse(remaining).fold(
                     ifLeft = { error ->
-                        echo("Parse error: ${error.message}", err = true)
+                        echo("${errorType(error)}: ${error.message}", err = true)
                         throw ProgramResult(1)
                     },
                     ifRight = { (value, rest) ->
                         eval(value, env).fold(
                             ifLeft = { error ->
-                                echo("Eval error: ${error.message}", err = true)
+                                echo("${errorType(error)}: ${error.message}", err = true)
                                 throw ProgramResult(1)
                             },
                             ifRight = { result ->
@@ -120,4 +120,10 @@ fun configureCli(): Klisp {
         ReplCommand(),
         RunCommand()
     )
+}
+
+private fun errorType(error: KlispError): String = when (error) {
+    is KlispError.ParseError -> "Parse error"
+    is KlispError.EvalError -> "Eval error"
+    is KlispError.RuntimeError -> "Runtime error"
 }

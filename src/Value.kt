@@ -78,9 +78,14 @@ sealed class Value {
     data class Symbol(val name: String) : Value()
     data class Lambda(
         val parameters: List<Symbol>,
-        val variadicParam: Symbol?,  // null if no variadic, else the name after '.'
+        val variadicParam: Symbol?,
         val body: Value,
         val capturedEnv: Environment
+    ) : Value()
+    data class Macro(
+        val parameters: List<Symbol>,
+        val variadicParam: Symbol?,
+        val body: Value
     ) : Value()
     data class Builtin(val specialForm: SpecialForm) : Value()
     data class Cons(val head: Value, val tail: Value) : Value()
@@ -109,18 +114,20 @@ fun Value.toPrintingString(): String = when (this) {
     is Value.Bool -> value.toString()
     is Value.Symbol -> name
     is Value.Builtin -> specialForm.toPrintingString()
-    is Value.Lambda -> {
-        val paramStr = if (variadicParam != null) {
-            val fixed = parameters.joinToString(" ") { it.toPrintingString() }
-            if (fixed.isEmpty()) ". ${variadicParam.toPrintingString()}"
-            else "$fixed . ${variadicParam.toPrintingString()}"
-        } else {
-            parameters.joinToString(" ") { it.toPrintingString() }
-        }
-        "(lambda ($paramStr) ${body.toPrintingString()})"
-    }
+    is Value.Lambda -> "(lambda (${formatParameters(parameters, variadicParam)}) ${body.toPrintingString()})"
+    is Value.Macro -> "(macro (${formatParameters(parameters, variadicParam)}) ${body.toPrintingString()})"
     is Value.Cons -> "(${toPrintingStringRecursive()})"
     is Value.Nil -> "nil"
+}
+
+private fun formatParameters(params: List<Value.Symbol>, variadicParam: Value.Symbol?): String {
+    return if (variadicParam != null) {
+        val fixed = params.joinToString(" ") { it.toPrintingString() }
+        if (fixed.isEmpty()) ". ${variadicParam.toPrintingString()}"
+        else "$fixed . ${variadicParam.toPrintingString()}"
+    } else {
+        params.joinToString(" ") { it.toPrintingString() }
+    }
 }
 
 private fun Value.Cons.toPrintingStringRecursive(): String = when (tail) {

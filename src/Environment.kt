@@ -11,7 +11,7 @@ class Environment(private val parent: Environment? = null) {
         bindings[name] = value
     }
 
-    fun set(name: String, value: Value): Either<KlispError.EvalError, Unit> {
+    fun set(name: String, value: Value): Either<KlispError, Unit> {
         return when {
             bindings.containsKey(name) -> {
                 bindings[name] = value
