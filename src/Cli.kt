@@ -73,40 +73,44 @@ class RunCommand : CliktCommand(
                     }
                 )
             }
-            file != null -> {
-                try {
-                    val content = File(file!!).readText()
-                    var remaining = content
 
-                    while (remaining.trim().isNotEmpty()) {
-                        parse(remaining).fold(
-                            ifLeft = { error ->
-                                echo("Parse error: ${error.message}", err = true)
-                                throw ProgramResult(1)
-                            },
-                            ifRight = { (value, rest) ->
-                                eval(value, env).fold(
-                                    ifLeft = { error ->
-                                        echo("Eval error: ${error.message}", err = true)
-                                        throw ProgramResult(1)
-                                    },
-                                    ifRight = { result ->
-                                        println(result.show())
-                                        remaining = rest
-                                    }
-                                )
-                            }
-                        )
-                    }
-                } catch (_: java.io.FileNotFoundException) {
-                    echo("Error: File not found: $file", err = true)
-                    throw ProgramResult(1)
-                }
-            }
+            file != null -> runFile(file!!, env)
+
             else -> {
                 echo("Error: Either provide a file path or use --eval", err = true)
                 throw ProgramResult(1)
             }
+        }
+    }
+
+    fun runFile(filePath: String, env: Environment) {
+        try {
+            val content = File(filePath).readText()
+            var remaining = content
+
+            while (remaining.trim().isNotEmpty()) {
+                parse(remaining).fold(
+                    ifLeft = { error ->
+                        echo("Parse error: ${error.message}", err = true)
+                        throw ProgramResult(1)
+                    },
+                    ifRight = { (value, rest) ->
+                        eval(value, env).fold(
+                            ifLeft = { error ->
+                                echo("Eval error: ${error.message}", err = true)
+                                throw ProgramResult(1)
+                            },
+                            ifRight = { result ->
+                                println(result.show())
+                                remaining = rest
+                            }
+                        )
+                    }
+                )
+            }
+        } catch (_: java.io.FileNotFoundException) {
+            echo("File not found: $file", err = true)
+            throw ProgramResult(1)
         }
     }
 }

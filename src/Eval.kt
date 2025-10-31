@@ -20,6 +20,7 @@ fun eval(value: Value, env: Environment = Environment()): EvalResult = either {
 
                 when (function) {
                     is Value.Builtin -> applyBuiltin(function.specialForm, args, env).bind()
+                    is Value.Lambda -> applyLambda(function, args, env).bind()
                     else -> raise(KlispError.EvalError("Cannot apply non-function: ${function.toPrintingString()}"))
                 }
             }
@@ -49,9 +50,93 @@ private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment)
 
         SpecialForm.DEFINE -> evalDefine(args, env).bind()
         SpecialForm.SET -> evalSet(args, env).bind()
+        SpecialForm.LAMBDA -> evalLambda(args, env).bind()
 
         else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
     }
+}
+
+private fun evalLambda(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("lambda expects exactly 2 arguments, got ${args.size}") }
+
+    // Parse parameter list: (x y . rest) or (x y) or (. rest)
+    val (params, variadicParam) = when (val paramList = args[0]) {
+        is Value.Cons -> parseParameters(paramList).bind()
+        Value.Nil -> emptyList<Value.Symbol>() to null
+        else -> raise(KlispError.EvalError("lambda expects parameter list, got ${paramList.toPrintingString()}"))
+    }
+
+    val body = args[1]
+    Value.Lambda(params, variadicParam, body, env)
+}
+
+private fun parseParameters(paramList: Value.Cons): Either<KlispError.EvalError, Pair<List<Value.Symbol>, Value.Symbol?>> = either {
+    val params = mutableListOf<Value.Symbol>()
+    var current: Value = paramList
+
+    while (current is Value.Cons) {
+        when (val head = current.head) {
+            is Value.Symbol -> {
+                if (head.name == ".") {
+                    val tail = current.tail
+                    ensure(tail is Value.Cons) { KlispError.EvalError("lambda expects symbol after '.'") }
+
+                    val varName = tail.head
+                    ensure(varName is Value.Symbol) {
+                        KlispError.EvalError("variadic parameter must be symbol, got ${varName.toPrintingString()}")
+                    }
+                    ensure(varName.name != ".") {
+                        KlispError.EvalError("variadic parameter name cannot be '.'")
+                    }
+                    ensure(tail.tail == Value.Nil) {
+                        KlispError.EvalError("variadic parameter must be last in parameter list")
+                    }
+
+                    return@either params to varName
+                } else {
+                    params.add(head)
+                }
+            }
+            else -> raise(KlispError.EvalError("lambda parameter must be symbol, got ${head.toPrintingString()}"))
+        }
+        current = current.tail
+    }
+
+    ensure(current == Value.Nil) { KlispError.EvalError("improper parameter list") }
+    params to null
+}
+
+private fun applyLambda(lambda: Value.Lambda, args: List<Value>, env: Environment): EvalResult = either {
+    val minArgs = lambda.parameters.size
+    val hasVariadic = lambda.variadicParam != null
+
+    if (hasVariadic) {
+        ensure(args.size >= minArgs) {
+            KlispError.EvalError("lambda expects at least $minArgs arguments, got ${args.size}")
+        }
+    } else {
+        ensure(args.size == minArgs) {
+            KlispError.EvalError("lambda expects $minArgs arguments, got ${args.size}")
+        }
+    }
+
+    val lambdaEnv = lambda.capturedEnv.createChild()
+
+    lambda.parameters.take(minArgs).zip(args.take(minArgs)).forEach { (param, arg) ->
+        val evaluatedArg = eval(arg, env).bind()
+        lambdaEnv.define(param.name, evaluatedArg)
+    }
+
+    lambda.variadicParam?.let { varParam ->
+        val restArgs = args.drop(minArgs)
+        val restList = restArgs.foldRight(Value.Nil as Value) { arg, acc ->
+            val evaluatedArg = eval(arg, env).bind()
+            Value.Cons(evaluatedArg, acc)
+        }
+        lambdaEnv.define(varParam.name, restList)
+    }
+
+    eval(lambda.body, lambdaEnv).bind()
 }
 
 private fun evalArithmetic(

@@ -76,7 +76,12 @@ sealed class Value {
     data class Str(val text: String) : Value()
     data class Bool(val value: Boolean) : Value()
     data class Symbol(val name: String) : Value()
-    data class Lambda(val parameters: List<Symbol>, val body: List<Value>) : Value()
+    data class Lambda(
+        val parameters: List<Symbol>,
+        val variadicParam: Symbol?,  // null if no variadic, else the name after '.'
+        val body: Value,
+        val capturedEnv: Environment
+    ) : Value()
     data class Builtin(val specialForm: SpecialForm) : Value()
     data class Cons(val head: Value, val tail: Value) : Value()
     object Nil : Value()
@@ -104,7 +109,16 @@ fun Value.toPrintingString(): String = when (this) {
     is Value.Bool -> value.toString()
     is Value.Symbol -> name
     is Value.Builtin -> specialForm.toPrintingString()
-    is Value.Lambda -> "(lambda ${parameters.joinToString(" ") { it.toPrintingString() }})"
+    is Value.Lambda -> {
+        val paramStr = if (variadicParam != null) {
+            val fixed = parameters.joinToString(" ") { it.toPrintingString() }
+            if (fixed.isEmpty()) ". ${variadicParam.toPrintingString()}"
+            else "$fixed . ${variadicParam.toPrintingString()}"
+        } else {
+            parameters.joinToString(" ") { it.toPrintingString() }
+        }
+        "(lambda ($paramStr) ${body.toPrintingString()})"
+    }
     is Value.Cons -> "(${toPrintingStringRecursive()})"
     is Value.Nil -> "nil"
 }

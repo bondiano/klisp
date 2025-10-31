@@ -143,6 +143,92 @@ class EvalTest {
     }
 
     @Nested
+    inner class LambdaTests {
+        @Test
+        fun `create and call lambda`() {
+            val env = Environment()
+            evalString("(def add (lambda (x y) (+ x y)))", env)
+            assertEquals(Value.Integer(5), evalString("(add 2 3)", env))
+        }
+
+        @Test
+        fun `lambda captures environment`() {
+            val env = Environment()
+            evalString("(def x 10)", env)
+            evalString("(def add-x (lambda (y) (+ x y)))", env)
+            assertEquals(Value.Integer(15), evalString("(add-x 5)", env))
+        }
+
+        @Test
+        fun `lambda closure updates with set!`() {
+            val env = Environment()
+            evalString("(def x 10)", env)
+            evalString("(def get-x (lambda () x))", env)
+            assertEquals(Value.Integer(10), evalString("(get-x)", env))
+            evalString("(set! x 20)", env)
+            assertEquals(Value.Integer(20), evalString("(get-x)", env))
+        }
+
+        @Test
+        fun `nested lambdas`() {
+            val env = Environment()
+            evalString("(def make-adder (lambda (x) (lambda (y) (+ x y))))", env)
+            evalString("(def add-5 (make-adder 5))", env)
+            assertEquals(Value.Integer(8), evalString("(add-5 3)", env))
+        }
+
+        @Test
+        fun `lambda wrong argument count`() {
+            val env = Environment()
+            evalString("(def f (lambda (x y) (+ x y)))", env)
+            shouldFailEval("(f 1)", env)
+            shouldFailEval("(f 1 2 3)", env)
+        }
+
+        @Test
+        fun `variadic lambda with no fixed params`() {
+            val env = Environment()
+            evalString("(def all-args (lambda (. rest) rest))", env)
+
+            assertEquals(Value.Nil, evalString("(all-args)", env))
+
+            val result1 = evalString("(all-args 1)", env)
+            assertEquals(Value.Cons(Value.Integer(1), Value.Nil), result1)
+
+            val result2 = evalString("(all-args 1 2 3)", env)
+            assertEquals(
+                Value.Cons(Value.Integer(1),
+                    Value.Cons(Value.Integer(2),
+                        Value.Cons(Value.Integer(3), Value.Nil))),
+                result2
+            )
+        }
+
+        @Test
+        fun `variadic lambda with fixed params`() {
+            val env = Environment()
+            evalString("(def f (lambda (x y . rest) rest))", env)
+
+            assertEquals(Value.Nil, evalString("(f 1 2)", env))
+
+            val result = evalString("(f 1 2 3 4 5)", env)
+            assertEquals(
+                Value.Cons(Value.Integer(3),
+                    Value.Cons(Value.Integer(4),
+                        Value.Cons(Value.Integer(5), Value.Nil))),
+                result
+            )
+        }
+
+        @Test
+        fun `variadic lambda not enough args`() {
+            val env = Environment()
+            evalString("(def f (lambda (x y . rest) x))", env)
+            shouldFailEval("(f 1)", env)  // Need at least 2 args
+        }
+    }
+
+    @Nested
     inner class ErrorTests {
         @Test
         fun `undefined symbol`() {
