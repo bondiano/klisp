@@ -3,7 +3,9 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Assertions.*
 
 class EvalTest {
-    private fun evalString(input: String, env: Environment = Environment()): Value {
+    private fun createTestEnv(): Environment = Environment(ioAdapter = StringIoAdapter.outputOnly())
+
+    private fun evalString(input: String, env: Environment = createTestEnv()): Value {
         val (value, _) = parse(input).fold(
             { error -> fail<Pair<Value, String>>("Parse error: ${error.message}") },
             { it }
@@ -14,7 +16,7 @@ class EvalTest {
         )
     }
 
-    private fun shouldFailEval(input: String, env: Environment = Environment()) {
+    private fun shouldFailEval(input: String, env: Environment = createTestEnv()) {
         val parseResult = parse(input)
         if (parseResult.isLeft()) return
 
@@ -92,14 +94,14 @@ class EvalTest {
     inner class EnvironmentTests {
         @Test
         fun `define and lookup variables`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 42)", env)
             assertEquals(Value.Integer(42), evalString("x", env))
         }
 
         @Test
         fun `use variables in expressions`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 10)", env)
             evalString("(def y 20)", env)
             assertEquals(Value.Integer(30), evalString("(+ x y)", env))
@@ -107,7 +109,7 @@ class EvalTest {
 
         @Test
         fun `set existing variables`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 10)", env)
             evalString("(set! x 42)", env)
             assertEquals(Value.Integer(42), evalString("x", env))
@@ -120,7 +122,7 @@ class EvalTest {
 
         @Test
         fun `nested scopes`() {
-            val parentEnv = Environment()
+            val parentEnv = createTestEnv()
             evalString("(def x 100)", parentEnv)
 
             val childEnv = parentEnv.createChild()
@@ -132,7 +134,7 @@ class EvalTest {
 
         @Test
         fun `set! modifies parent scope`() {
-            val parentEnv = Environment()
+            val parentEnv = createTestEnv()
             evalString("(def x 100)", parentEnv)
 
             val childEnv = parentEnv.createChild()
@@ -146,14 +148,14 @@ class EvalTest {
     inner class LambdaTests {
         @Test
         fun `create and call lambda`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def add (lambda (x y) (+ x y)))", env)
             assertEquals(Value.Integer(5), evalString("(add 2 3)", env))
         }
 
         @Test
         fun `lambda captures environment`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 10)", env)
             evalString("(def add-x (lambda (y) (+ x y)))", env)
             assertEquals(Value.Integer(15), evalString("(add-x 5)", env))
@@ -161,7 +163,7 @@ class EvalTest {
 
         @Test
         fun `lambda closure updates with set!`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 10)", env)
             evalString("(def get-x (lambda () x))", env)
             assertEquals(Value.Integer(10), evalString("(get-x)", env))
@@ -171,7 +173,7 @@ class EvalTest {
 
         @Test
         fun `nested lambdas`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def make-adder (lambda (x) (lambda (y) (+ x y))))", env)
             evalString("(def add-5 (make-adder 5))", env)
             assertEquals(Value.Integer(8), evalString("(add-5 3)", env))
@@ -179,7 +181,7 @@ class EvalTest {
 
         @Test
         fun `lambda wrong argument count`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def f (lambda (x y) (+ x y)))", env)
             shouldFailEval("(f 1)", env)
             shouldFailEval("(f 1 2 3)", env)
@@ -187,7 +189,7 @@ class EvalTest {
 
         @Test
         fun `variadic lambda with no fixed params`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def all-args (lambda (. rest) rest))", env)
 
             assertEquals(Value.Nil, evalString("(all-args)", env))
@@ -206,7 +208,7 @@ class EvalTest {
 
         @Test
         fun `variadic lambda with fixed params`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def f (lambda (x y . rest) rest))", env)
 
             assertEquals(Value.Nil, evalString("(f 1 2)", env))
@@ -222,7 +224,7 @@ class EvalTest {
 
         @Test
         fun `variadic lambda not enough args`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def f (lambda (x y . rest) x))", env)
             shouldFailEval("(f 1)", env)  // Need at least 2 args
         }
@@ -232,14 +234,14 @@ class EvalTest {
     inner class MacroTests {
         @Test
         fun `simple identity macro`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def id (macro (x) x))", env)
             assertEquals(Value.Integer(42), evalString("(id 42)", env))
         }
 
         @Test
         fun `macro transforms code`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def unless (macro (cond then else) (if cond else then)))", env)
             // (unless false 1 2) expands to (if false 2 1) => 1 (else branch)
             assertEquals(Value.Integer(1), evalString("(unless false 1 2)", env))
@@ -248,7 +250,7 @@ class EvalTest {
 
         @Test
         fun `expand-macro shows expansion`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def id (macro (x) x))", env)
             val result = evalString("(expand-macro (id 42))", env)
             assertEquals(Value.Integer(42), result)
@@ -256,7 +258,7 @@ class EvalTest {
 
         @Test
         fun `macro with variadic params`() {
-            val env = Environment()
+            val env = createTestEnv()
             // Macro that takes first arg and ignores rest
             evalString("(def first-arg (macro (x . rest) x))", env)
             assertEquals(Value.Integer(1), evalString("(first-arg 1 2 3)", env))
@@ -264,7 +266,7 @@ class EvalTest {
 
         @Test
         fun `nested macro expansion`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def id (macro (x) x))", env)
             evalString("(def wrap (macro (x) (id x)))", env)
             assertEquals(Value.Integer(42), evalString("(wrap 42)", env))
@@ -275,13 +277,13 @@ class EvalTest {
     inner class EvalFormTests {
         @Test
         fun `eval quoted expression`() {
-            val env = Environment()
+            val env = createTestEnv()
             assertEquals(Value.Integer(3), evalString("(eval '(+ 1 2))", env))
         }
 
         @Test
         fun `eval with variables`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 10)", env)
             evalString("(def code '(+ x 5))", env)
             assertEquals(Value.Integer(15), evalString("(eval code)", env))
@@ -289,9 +291,8 @@ class EvalTest {
 
         @Test
         fun `eval constructs code dynamically`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 10)", env)
-            // Build code at runtime: (+ x x)
             assertEquals(Value.Integer(20), evalString("(eval '(+ x x))", env))
         }
     }
@@ -304,7 +305,7 @@ class EvalTest {
             assertTrue(parseResult.isRight())
 
             val (value, _) = parseResult.getOrNull()!!
-            val evalResult = eval(value, Environment())
+            val evalResult = eval(value, createTestEnv())
 
             assertTrue(evalResult.isLeft())
             val error = evalResult.leftOrNull()
@@ -314,7 +315,7 @@ class EvalTest {
 
         @Test
         fun `raise with number`() {
-            val result = eval(parse("(raise 404)").getOrNull()!!.first, Environment())
+            val result = eval(parse("(raise 404)").getOrNull()!!.first, createTestEnv())
             assertTrue(result.isLeft())
             assertTrue(result.leftOrNull() is KlispError.RuntimeError)
         }
@@ -355,7 +356,7 @@ class EvalTest {
     inner class DoTests {
         @Test
         fun `do executes sequentially`() {
-            val env = Environment()
+            val env = createTestEnv()
             val result = evalString("(do (def x 10) (def y 20) (+ x y))", env)
             assertEquals(Value.Integer(30), result)
         }
@@ -367,7 +368,7 @@ class EvalTest {
 
         @Test
         fun `do with side effects`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(do (def x 1) (set! x 10) x)", env)
             assertEquals(Value.Integer(10), evalString("x", env))
         }
@@ -387,7 +388,7 @@ class EvalTest {
 
         @Test
         fun `symbol creates symbol from string`() {
-            val env = Environment()
+            val env = createTestEnv()
             evalString("(def x 42)", env)
             evalString("(def name \"x\")", env)
             val sym = evalString("(symbol name)", env)
@@ -400,7 +401,83 @@ class EvalTest {
     inner class PrintTests {
         @Test
         fun `print returns value`() {
-            assertEquals(Value.Integer(42), evalString("(print 42)"))
+            val io = StringIoAdapter.outputOnly()
+            val env = Environment(ioAdapter = io)
+            assertEquals(Value.Integer(42), evalString("(print 42)", env))
+            assertEquals("42\n", io.getOutput())
+        }
+
+        @Test
+        fun `print string`() {
+            val io = StringIoAdapter.outputOnly()
+            val env = Environment(ioAdapter = io)
+            assertEquals(Value.Str("hello"), evalString("(print \"hello\")", env))
+            assertEquals("hello\n", io.getOutput())
+        }
+
+        @Test
+        fun `print multiple times`() {
+            val io = StringIoAdapter.outputOnly()
+            val env = Environment(ioAdapter = io)
+            evalString("(print 1)", env)
+            evalString("(print 2)", env)
+            evalString("(print 3)", env)
+            assertEquals("1\n2\n3\n", io.getOutput())
+        }
+    }
+
+    @Nested
+    inner class ReadTests {
+        @Test
+        fun `read integer`() {
+            val io = StringIoAdapter.withInput("42")
+            val env = Environment(ioAdapter = io)
+            assertEquals(Value.Integer(42), evalString("(read)", env))
+        }
+
+        @Test
+        fun `read string`() {
+            val io = StringIoAdapter.withInput("\"hello\"")
+            val env = Environment(ioAdapter = io)
+            assertEquals(Value.Str("hello"), evalString("(read)", env))
+        }
+
+        @Test
+        fun `read expression`() {
+            val io = StringIoAdapter.withInput("(+ 1 2)")
+            val env = Environment(ioAdapter = io)
+            val expr = evalString("(read)", env)
+            assertEquals(
+                Value.Cons(
+                    Value.Builtin(SpecialForm.ADD),
+                    Value.Cons(Value.Integer(1), Value.Cons(Value.Integer(2), Value.Nil))
+                ),
+                expr
+            )
+        }
+
+        @Test
+        fun `read and eval`() {
+            val io = StringIoAdapter.withInput("(+ 10 20)")
+            val env = Environment(ioAdapter = io)
+            val result = evalString("(eval (read))", env)
+            assertEquals(Value.Integer(30), result)
+        }
+
+        @Test
+        fun `read multiple times`() {
+            val io = StringIoAdapter.withInput("1", "2", "3")
+            val env = Environment(ioAdapter = io)
+            assertEquals(Value.Integer(1), evalString("(read)", env))
+            assertEquals(Value.Integer(2), evalString("(read)", env))
+            assertEquals(Value.Integer(3), evalString("(read)", env))
+        }
+
+        @Test
+        fun `read fails when no input`() {
+            val io = StringIoAdapter.outputOnly()
+            val env = Environment(ioAdapter = io)
+            shouldFailEval("(read)", env)
         }
     }
 

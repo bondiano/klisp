@@ -7,7 +7,7 @@ import java.nio.file.Paths
 
 class Repl {
     private val historyFile = getHistoryFile()
-    private val env = Environment()
+    private val env = Environment(ioAdapter = StdioAdapter())
 
     fun start() {
         val terminal = TerminalBuilder.builder()

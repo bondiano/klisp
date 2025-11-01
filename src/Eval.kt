@@ -73,6 +73,7 @@ private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment)
         SpecialForm.SYMBOL -> evalSymbolForm(args, env).bind()
 
         SpecialForm.PRINT -> evalPrint(args, env).bind()
+        SpecialForm.READ -> evalRead(env).bind()
 
         else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
     }
@@ -437,8 +438,17 @@ private fun evalPrint(args: List<Value>, env: Environment): EvalResult = either 
     ensure(args.size == 1) { KlispError.EvalError("print expects exactly 1 argument, got ${args.size}") }
 
     val value = evalExpanded(args[0], env).bind()
-    println(value.toPrintingString())
+    val io = env.getIoAdapter()
+    io.println(value.toPrintingString()).bind()
     value
+}
+
+private fun evalRead(env: Environment): EvalResult = either {
+    val io = env.getIoAdapter()
+    val line = io.readLine().bind()
+
+    val (parsedValue, _) = parse(line).bind()
+    parsedValue
 }
 
 private fun consToList(value: Value): List<Value> {

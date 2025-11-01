@@ -53,7 +53,7 @@ class RunCommand : CliktCommand(
     private val evalExpr by option("--eval", "-e")
 
     override fun run() {
-        val env = Environment()
+        val env = Environment(ioAdapter = StdioAdapter())
 
         when {
             evalExpr != null -> {
