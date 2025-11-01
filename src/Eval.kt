@@ -56,6 +56,7 @@ private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment)
         }
 
         SpecialForm.IF -> evalIf(args, env).bind()
+        SpecialForm.DO -> evalDo(args, env).bind()
         SpecialForm.DEFINE -> evalDefine(args, env).bind()
         SpecialForm.SET -> evalSet(args, env).bind()
         SpecialForm.LAMBDA -> evalLambda(args, env).bind()
@@ -63,6 +64,15 @@ private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment)
         SpecialForm.EXPAND_MACRO -> evalExpandMacro(args, env).bind()
         SpecialForm.EVAL -> evalEvalForm(args, env).bind()
         SpecialForm.RAISE -> evalRaise(args, env).bind()
+
+        SpecialForm.CAR -> evalCar(args, env).bind()
+        SpecialForm.CDR -> evalCdr(args, env).bind()
+        SpecialForm.CONS -> evalConsForm(args, env).bind()
+
+        SpecialForm.TYPE_OF -> evalTypeOf(args, env).bind()
+        SpecialForm.SYMBOL -> evalSymbolForm(args, env).bind()
+
+        SpecialForm.PRINT -> evalPrint(args, env).bind()
 
         else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
     }
@@ -116,41 +126,43 @@ private fun evalLambda(args: List<Value>, env: Environment): EvalResult = either
     Value.Lambda(params, variadicParam, body, env)
 }
 
-private fun parseParameters(paramList: Value.Cons): Either<KlispError.EvalError, Pair<List<Value.Symbol>, Value.Symbol?>> = either {
-    val params = mutableListOf<Value.Symbol>()
-    var current: Value = paramList
+private fun parseParameters(paramList: Value.Cons): Either<KlispError.EvalError, Pair<List<Value.Symbol>, Value.Symbol?>> =
+    either {
+        val params = mutableListOf<Value.Symbol>()
+        var current: Value = paramList
 
-    while (current is Value.Cons) {
-        when (val head = current.head) {
-            is Value.Symbol -> {
-                if (head.name == ".") {
-                    val tail = current.tail
-                    ensure(tail is Value.Cons) { KlispError.EvalError("lambda expects symbol after '.'") }
+        while (current is Value.Cons) {
+            when (val head = current.head) {
+                is Value.Symbol -> {
+                    if (head.name == ".") {
+                        val tail = current.tail
+                        ensure(tail is Value.Cons) { KlispError.EvalError("lambda expects symbol after '.'") }
 
-                    val varName = tail.head
-                    ensure(varName is Value.Symbol) {
-                        KlispError.EvalError("variadic parameter must be symbol, got ${varName.toPrintingString()}")
-                    }
-                    ensure(varName.name != ".") {
-                        KlispError.EvalError("variadic parameter name cannot be '.'")
-                    }
-                    ensure(tail.tail == Value.Nil) {
-                        KlispError.EvalError("variadic parameter must be last in parameter list")
-                    }
+                        val varName = tail.head
+                        ensure(varName is Value.Symbol) {
+                            KlispError.EvalError("variadic parameter must be symbol, got ${varName.toPrintingString()}")
+                        }
+                        ensure(varName.name != ".") {
+                            KlispError.EvalError("variadic parameter name cannot be '.'")
+                        }
+                        ensure(tail.tail == Value.Nil) {
+                            KlispError.EvalError("variadic parameter must be last in parameter list")
+                        }
 
-                    return@either params to varName
-                } else {
-                    params.add(head)
+                        return@either params to varName
+                    } else {
+                        params.add(head)
+                    }
                 }
-            }
-            else -> raise(KlispError.EvalError("lambda parameter must be symbol, got ${head.toPrintingString()}"))
-        }
-        current = current.tail
-    }
 
-    ensure(current == Value.Nil) { KlispError.EvalError("improper parameter list") }
-    params to null
-}
+                else -> raise(KlispError.EvalError("lambda parameter must be symbol, got ${head.toPrintingString()}"))
+            }
+            current = current.tail
+        }
+
+        ensure(current == Value.Nil) { KlispError.EvalError("improper parameter list") }
+        params to null
+    }
 
 private fun applyLambda(lambda: Value.Lambda, args: List<Value>, env: Environment): EvalResult = either {
     val minArgs = lambda.parameters.size
@@ -349,8 +361,83 @@ private fun evalSet(args: List<Value>, env: Environment): EvalResult = either {
         else -> raise(KlispError.EvalError("set! expects symbol as first argument, got ${nameValue.toPrintingString()}"))
     }
 
-    val value = eval(args[1], env).bind()
+    val value = evalExpanded(args[1], env).bind()
     env.set(name, value).bind()
+    value
+}
+
+private fun evalCar(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("car expects exactly 1 argument, got ${args.size}") }
+
+    when (val list = evalExpanded(args[0], env).bind()) {
+        is Value.Cons -> list.head
+        Value.Nil -> raise(KlispError.EvalError("car of empty list"))
+        else -> raise(KlispError.EvalError("car expects list, got ${list.toPrintingString()}"))
+    }
+}
+
+private fun evalCdr(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("cdr expects exactly 1 argument, got ${args.size}") }
+
+    when (val list = evalExpanded(args[0], env).bind()) {
+        is Value.Cons -> list.tail
+        Value.Nil -> raise(KlispError.EvalError("cdr of empty list"))
+        else -> raise(KlispError.EvalError("cdr expects list, got ${list.toPrintingString()}"))
+    }
+}
+
+private fun evalConsForm(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError("cons expects exactly 2 arguments, got ${args.size}") }
+
+    val head = evalExpanded(args[0], env).bind()
+    val tail = evalExpanded(args[1], env).bind()
+
+    Value.Cons(head, tail)
+}
+
+private fun evalDo(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.isNotEmpty()) { KlispError.EvalError("do expects at least 1 argument") }
+
+    var lastResult: Value = Value.Nil
+    args.forEach { expr ->
+        lastResult = evalExpanded(expr, env).bind()
+    }
+    lastResult
+}
+
+private fun evalTypeOf(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("type-of expects exactly 1 argument, got ${args.size}") }
+
+    val value = evalExpanded(args[0], env).bind()
+    val typeName = when (value) {
+        is Value.Integer -> "integer"
+        is Value.Float -> "float"
+        is Value.Str -> "string"
+        is Value.Bool -> "boolean"
+        is Value.Symbol -> "symbol"
+        is Value.Lambda -> "lambda"
+        is Value.Macro -> "macro"
+        is Value.Builtin -> "builtin"
+        is Value.Cons -> "list"
+        Value.Nil -> "nil"
+    }
+    Value.Str(typeName)
+}
+
+private fun evalSymbolForm(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("symbol expects exactly 1 argument, got ${args.size}") }
+
+    when (val value = evalExpanded(args[0], env).bind()) {
+        is Value.Str -> Value.Symbol(value.text)
+        else -> raise(KlispError.EvalError("symbol expects string, got ${value.toPrintingString()}"))
+    }
+}
+
+private fun evalPrint(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 1) { KlispError.EvalError("print expects exactly 1 argument, got ${args.size}") }
+
+    val value = evalExpanded(args[0], env).bind()
+    println(value.toPrintingString())
     value
 }
 

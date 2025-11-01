@@ -321,6 +321,90 @@ class EvalTest {
     }
 
     @Nested
+    inner class ListOperationsTests {
+        @Test
+        fun `car returns first element`() {
+            assertEquals(Value.Integer(1), evalString("(car '(1 2 3))"))
+        }
+
+        @Test
+        fun `cdr returns rest`() {
+            val result = evalString("(cdr '(1 2 3))")
+            assertEquals(
+                Value.Cons(Value.Integer(2), Value.Cons(Value.Integer(3), Value.Nil)),
+                result
+            )
+        }
+
+        @Test
+        fun `cons creates pair`() {
+            val result = evalString("(cons 1 '(2 3))")
+            assertEquals(
+                Value.Cons(Value.Integer(1), Value.Cons(Value.Integer(2), Value.Cons(Value.Integer(3), Value.Nil))),
+                result
+            )
+        }
+
+        @Test
+        fun `car and cdr composition`() {
+            assertEquals(Value.Integer(2), evalString("(car (cdr '(1 2 3)))"))
+        }
+    }
+
+    @Nested
+    inner class DoTests {
+        @Test
+        fun `do executes sequentially`() {
+            val env = Environment()
+            val result = evalString("(do (def x 10) (def y 20) (+ x y))", env)
+            assertEquals(Value.Integer(30), result)
+        }
+
+        @Test
+        fun `do returns last value`() {
+            assertEquals(Value.Integer(3), evalString("(do 1 2 3)"))
+        }
+
+        @Test
+        fun `do with side effects`() {
+            val env = Environment()
+            evalString("(do (def x 1) (set! x 10) x)", env)
+            assertEquals(Value.Integer(10), evalString("x", env))
+        }
+    }
+
+    @Nested
+    inner class MetaTests {
+        @Test
+        fun `type-of returns type names`() {
+            assertEquals(Value.Str("integer"), evalString("(type-of 42)"))
+            assertEquals(Value.Str("float"), evalString("(type-of 3.14)"))
+            assertEquals(Value.Str("string"), evalString("(type-of \"hello\")"))
+            assertEquals(Value.Str("boolean"), evalString("(type-of true)"))
+            assertEquals(Value.Str("nil"), evalString("(type-of nil)"))
+            assertEquals(Value.Str("list"), evalString("(type-of '(1 2 3))"))
+        }
+
+        @Test
+        fun `symbol creates symbol from string`() {
+            val env = Environment()
+            evalString("(def x 42)", env)
+            evalString("(def name \"x\")", env)
+            val sym = evalString("(symbol name)", env)
+            assertEquals(Value.Symbol("x"), sym)
+            assertEquals(Value.Integer(42), evalString("(eval (symbol name))", env))
+        }
+    }
+
+    @Nested
+    inner class PrintTests {
+        @Test
+        fun `print returns value`() {
+            assertEquals(Value.Integer(42), evalString("(print 42)"))
+        }
+    }
+
+    @Nested
     inner class ErrorTests {
         @Test
         fun `undefined symbol`() {
