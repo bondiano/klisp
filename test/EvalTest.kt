@@ -503,4 +503,118 @@ class EvalTest {
             shouldFailEval("(def 42 100)")
         }
     }
+
+    @Nested
+    inner class TailCallOptimizationTests {
+        @Test
+        fun `tail recursive factorial does not overflow`() {
+            val env = createTestEnv()
+
+            evalString("""
+                (def factorial (lambda (n acc)
+                    (if (= n 0)
+                        acc
+                        (factorial (- n 1) (* n acc)))))
+            """.trimIndent(), env)
+
+            // This would cause StackOverflowError without TCO
+            val result = evalString("(factorial 1000 1)", env)
+            assertTrue(result is Value.Integer || result is Value.Float)
+        }
+
+        @Test
+        fun `mutual recursion even odd`() {
+            val env = createTestEnv()
+
+            evalString("""
+                (def is-even (lambda (n)
+                    (if (= n 0)
+                        true
+                        (is-odd (- n 1)))))
+            """.trimIndent(), env)
+
+            evalString("""
+                (def is-odd (lambda (n)
+                    (if (= n 0)
+                        false
+                        (is-even (- n 1)))))
+            """.trimIndent(), env)
+
+            // Deep mutual recursion should not overflow
+            assertEquals(Value.Bool(true), evalString("(is-even 10000)", env))
+            assertEquals(Value.Bool(false), evalString("(is-odd 10000)", env))
+        }
+
+        @Test
+        fun `tail recursive sum`() {
+            val env = createTestEnv()
+
+            evalString("""
+                (def sum (lambda (n acc)
+                    (if (= n 0)
+                        acc
+                        (sum (- n 1) (+ n acc)))))
+            """.trimIndent(), env)
+
+            val result = evalString("(sum 5000 0)", env)
+            assertEquals(Value.Integer(12502500), result)
+        }
+
+        @Test
+        fun `nested if in tail position`() {
+            val env = createTestEnv()
+
+            evalString("""
+                (def nested-if (lambda (n)
+                    (if (> n 0)
+                        (if (= n 1)
+                            1
+                            (nested-if (- n 1)))
+                        0)))
+            """.trimIndent(), env)
+
+            val result = evalString("(nested-if 5000)", env)
+            assertEquals(Value.Integer(1), result)
+        }
+
+        @Test
+        fun `do with tail position`() {
+            val env = createTestEnv()
+
+            evalString("""
+                (def countdown (lambda (n)
+                    (do
+                        (if (= n 0)
+                            0
+                            (countdown (- n 1))))))
+            """.trimIndent(), env)
+
+            // Should not overflow
+            val result = evalString("(countdown 5000)", env)
+            assertEquals(Value.Integer(0), result)
+        }
+
+        @Test
+        fun `fibonacci with accumulators`() {
+            val env = createTestEnv()
+
+            evalString("""
+                (def fib (lambda (n a b)
+                    (if (= n 0)
+                        a
+                        (fib (- n 1) b (+ a b)))))
+            """.trimIndent(), env)
+
+            assertEquals(Value.Integer(0), evalString("(fib 0 0 1)", env))
+            assertEquals(Value.Integer(1), evalString("(fib 1 0 1)", env))
+            assertEquals(Value.Integer(1), evalString("(fib 2 0 1)", env))
+            assertEquals(Value.Integer(2), evalString("(fib 3 0 1)", env))
+            assertEquals(Value.Integer(5), evalString("(fib 5 0 1)", env))
+            assertEquals(Value.Integer(55), evalString("(fib 10 0 1)", env))
+
+            // Deep recursion should work
+            val result = evalString("(fib 1000 0 1)", env)
+            assertTrue(result is Value.Integer || result is Value.Float)
+        }
+    }
 }

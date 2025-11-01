@@ -143,4 +143,3 @@ fun Value.show(): String = when (this) {
     is Value.Str -> "\"$text\""
     else -> toPrintingString()
 }
-

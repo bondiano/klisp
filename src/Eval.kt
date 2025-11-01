@@ -4,30 +4,56 @@ import arrow.core.raise.ensure
 import kotlin.math.pow
 
 typealias EvalResult = Either<KlispError, Value>
+typealias TrampolineResult = Either<KlispError, Trampoline<Value>>
 
 fun eval(value: Value, env: Environment = Environment()): EvalResult = either {
-    val expanded = expand(value, env).bind()
-
-    evalExpanded(expanded, env).bind()
+    evalTrampoline(value, env).bind().run()
 }
 
+private fun evalTrampoline(value: Value, env: Environment): TrampolineResult = either {
+    val expanded = expand(value, env).bind()
+    evalExpandedTrampoline(expanded, env).bind()
+}
+
+/**
+ * Evaluating in NON-tail positions
+ * Immediately runs the trampoline to get the result
+ * Use this when the result is needed immediately (e.g., function arguments, conditions)
+ * For TAIL positions, use evalExpandedTrampoline directly
+ */
 private fun evalExpanded(value: Value, env: Environment): EvalResult = either {
+    evalExpandedTrampoline(value, env).bind().run()
+}
+
+/**
+ * Internal evaluation of expanded form returning Trampoline
+ * This is where tail call optimization happens
+ */
+private fun evalExpandedTrampoline(value: Value, env: Environment): TrampolineResult = either {
     when (value) {
-        is Value.Integer, is Value.Float, is Value.Str, is Value.Bool, Value.Nil -> value
-        is Value.Builtin -> value
-        is Value.Lambda -> value
-        is Value.Macro -> value
-        is Value.Symbol -> env.get(value.name) ?: raise(KlispError.EvalError("Undefined symbol: ${value.name}"))
+        is Value.Integer, is Value.Float, is Value.Str, is Value.Bool, Value.Nil ->
+            done(value)
+
+        is Value.Builtin -> done(value)
+        is Value.Lambda -> done(value)
+        is Value.Macro -> done(value)
+
+        is Value.Symbol -> {
+            val resolved = env.get(value.name)
+                ?: raise(KlispError.EvalError("Undefined symbol: ${value.name}"))
+            done(resolved)
+        }
+
         is Value.Cons -> {
             if (value.head == Value.Nil && value.tail == Value.Nil) {
-                Value.Nil
+                done(Value.Nil)
             } else {
-                val function = evalExpanded(value.head, env).bind()
+                val function = evalExpandedTrampoline(value.head, env).bind().run()
                 val args = consToList(value.tail)
 
                 when (function) {
-                    is Value.Builtin -> applyBuiltin(function.specialForm, args, env).bind()
-                    is Value.Lambda -> applyLambda(function, args, env).bind()
+                    is Value.Builtin -> applyBuiltinTrampoline(function.specialForm, args, env).bind()
+                    is Value.Lambda -> applyLambdaTrampoline(function, args, env).bind()
                     else -> raise(KlispError.EvalError("Cannot apply non-function: ${function.toPrintingString()}"))
                 }
             }
@@ -35,45 +61,54 @@ private fun evalExpanded(value: Value, env: Environment): EvalResult = either {
     }
 }
 
-private fun applyBuiltin(form: SpecialForm, args: List<Value>, env: Environment): EvalResult = either {
+/**
+ * Apply builtin special form with trampoline support
+ * Forms with tail positions (IF, DO) use special trampoline versions
+ */
+private fun applyBuiltinTrampoline(
+    form: SpecialForm,
+    args: List<Value>,
+    env: Environment
+): TrampolineResult = either {
     when (form) {
-        SpecialForm.ADD -> evalArithmetic(args, env, 0L, 0.0) { a, b -> a + b }.bind()
-        SpecialForm.SUB -> evalSub(args, env).bind()
-        SpecialForm.MUL -> evalArithmetic(args, env, 1L, 1.0) { a, b -> a * b }.bind()
-        SpecialForm.DIV -> evalDiv(args, env).bind()
-        SpecialForm.MOD -> evalMod(args, env).bind()
-        SpecialForm.POW -> evalPow(args, env).bind()
+        SpecialForm.ADD -> done(evalArithmetic(args, env, 0L, 0.0) { a, b -> a + b }.bind())
+        SpecialForm.SUB -> done(evalSub(args, env).bind())
+        SpecialForm.MUL -> done(evalArithmetic(args, env, 1L, 1.0) { a, b -> a * b }.bind())
+        SpecialForm.DIV -> done(evalDiv(args, env).bind())
+        SpecialForm.MOD -> done(evalMod(args, env).bind())
+        SpecialForm.POW -> done(evalPow(args, env).bind())
 
-        SpecialForm.EQ -> evalEq(args, env).bind()
-        SpecialForm.GT -> evalComparison(args, env) { a, b -> a > b }.bind()
-        SpecialForm.LT -> evalComparison(args, env) { a, b -> a < b }.bind()
+        SpecialForm.EQ -> done(evalEq(args, env).bind())
+        SpecialForm.GT -> done(evalComparison(args, env) { a, b -> a > b }.bind())
+        SpecialForm.LT -> done(evalComparison(args, env) { a, b -> a < b }.bind())
 
-        SpecialForm.STR_CONCAT -> evalStrConcat(args, env).bind()
+        SpecialForm.STR_CONCAT -> done(evalStrConcat(args, env).bind())
 
         SpecialForm.QUOTE -> {
             ensure(args.size == 1) { KlispError.EvalError("quote expects 1 argument, got ${args.size}") }
-            args[0]
+            done(args[0])
         }
 
-        SpecialForm.IF -> evalIf(args, env).bind()
-        SpecialForm.DO -> evalDo(args, env).bind()
-        SpecialForm.DEFINE -> evalDefine(args, env).bind()
-        SpecialForm.SET -> evalSet(args, env).bind()
-        SpecialForm.LAMBDA -> evalLambda(args, env).bind()
-        SpecialForm.MACRO -> evalMacro(args).bind()
-        SpecialForm.EXPAND_MACRO -> evalExpandMacro(args, env).bind()
-        SpecialForm.EVAL -> evalEvalForm(args, env).bind()
-        SpecialForm.RAISE -> evalRaise(args, env).bind()
+        SpecialForm.IF -> evalIfTrampoline(args, env).bind()
+        SpecialForm.DO -> evalDoTrampoline(args, env).bind()
 
-        SpecialForm.CAR -> evalCar(args, env).bind()
-        SpecialForm.CDR -> evalCdr(args, env).bind()
-        SpecialForm.CONS -> evalConsForm(args, env).bind()
+        SpecialForm.DEFINE -> done(evalDefine(args, env).bind())
+        SpecialForm.SET -> done(evalSet(args, env).bind())
+        SpecialForm.LAMBDA -> done(evalLambda(args, env).bind())
+        SpecialForm.MACRO -> done(evalMacro(args).bind())
+        SpecialForm.EXPAND_MACRO -> done(evalExpandMacro(args, env).bind())
+        SpecialForm.EVAL -> done(evalEvalForm(args, env).bind())
+        SpecialForm.RAISE -> done(evalRaise(args, env).bind())
 
-        SpecialForm.TYPE_OF -> evalTypeOf(args, env).bind()
-        SpecialForm.SYMBOL -> evalSymbolForm(args, env).bind()
+        SpecialForm.CAR -> done(evalCar(args, env).bind())
+        SpecialForm.CDR -> done(evalCdr(args, env).bind())
+        SpecialForm.CONS -> done(evalConsForm(args, env).bind())
 
-        SpecialForm.PRINT -> evalPrint(args, env).bind()
-        SpecialForm.READ -> evalRead(env).bind()
+        SpecialForm.TYPE_OF -> done(evalTypeOf(args, env).bind())
+        SpecialForm.SYMBOL -> done(evalSymbolForm(args, env).bind())
+
+        SpecialForm.PRINT -> done(evalPrint(args, env).bind())
+        SpecialForm.READ -> done(evalRead(env).bind())
 
         else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
     }
@@ -93,23 +128,29 @@ private fun evalRaise(args: List<Value>, env: Environment): EvalResult = either 
     raise(KlispError.RuntimeError(errorValue.toPrintingString()))
 }
 
-private fun evalIf(args: List<Value>, env: Environment): EvalResult = either {
+/**
+ * Eval IF with tail position optimization
+ * Then and else branches are in tail position
+ */
+private fun evalIfTrampoline(args: List<Value>, env: Environment): TrampolineResult = either {
     ensure(args.size in 2..3) {
         KlispError.EvalError("if expects 2 or 3 arguments, got ${args.size}")
     }
 
+    // Condition is NOT in tail position - evaluate immediately
     val isTruthy = when (val condition = evalExpanded(args[0], env).bind()) {
         is Value.Bool -> condition.value
         Value.Nil -> false
         else -> true
     }
 
+    // Then/else branches ARE in the tail position
     if (isTruthy) {
-        evalExpanded(args[1], env).bind()
+        evalExpandedTrampoline(args[1], env).bind()
     } else if (args.size == 3) {
-        evalExpanded(args[2], env).bind()
+        evalExpandedTrampoline(args[2], env).bind()
     } else {
-        Value.Nil
+        done(Value.Nil)
     }
 }
 
@@ -165,10 +206,15 @@ private fun parseParameters(paramList: Value.Cons): Either<KlispError.EvalError,
         params to null
     }
 
-private fun applyLambda(lambda: Value.Lambda, args: List<Value>, env: Environment): EvalResult = either {
+private fun applyLambdaTrampoline(
+    lambda: Value.Lambda,
+    args: List<Value>,
+    env: Environment
+): TrampolineResult = either {
     val minArgs = lambda.parameters.size
     val hasVariadic = lambda.variadicParam != null
 
+    // Validate argument count
     if (hasVariadic) {
         ensure(args.size >= minArgs) {
             KlispError.EvalError("lambda expects at least $minArgs arguments, got ${args.size}")
@@ -195,7 +241,12 @@ private fun applyLambda(lambda: Value.Lambda, args: List<Value>, env: Environmen
         lambdaEnv.define(varParam.name, restList)
     }
 
-    eval(lambda.body, lambdaEnv).bind()
+    // KEY: Return More to defer evaluation - this enables tail call optimization!
+    // The Raise context is captured safely - the lambda executes later when run() is called,
+    // but by then the either block has already returned the Either value with the More inside.
+    // When the thunk executes, it creates its own either context via evalTrampoline.
+    @Suppress("EscapedRaise")
+    more { evalTrampoline(lambda.body, lambdaEnv).bind() }
 }
 
 private fun evalArithmetic(
@@ -396,14 +447,15 @@ private fun evalConsForm(args: List<Value>, env: Environment): EvalResult = eith
     Value.Cons(head, tail)
 }
 
-private fun evalDo(args: List<Value>, env: Environment): EvalResult = either {
+private fun evalDoTrampoline(args: List<Value>, env: Environment): TrampolineResult = either {
     ensure(args.isNotEmpty()) { KlispError.EvalError("do expects at least 1 argument") }
 
-    var lastResult: Value = Value.Nil
-    args.forEach { expr ->
-        lastResult = evalExpanded(expr, env).bind()
+    // All expressions except the last are NOT in the tail position - evaluate immediately
+    args.dropLast(1).forEach { expr ->
+        evalExpanded(expr, env).bind()
     }
-    lastResult
+
+    evalExpandedTrampoline(args.last(), env).bind()
 }
 
 private fun evalTypeOf(args: List<Value>, env: Environment): EvalResult = either {
