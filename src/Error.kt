@@ -1,3 +1,5 @@
+package com.bondiano.klisp
+
 sealed interface KlispError {
     val message: String
 

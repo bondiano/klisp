@@ -1,3 +1,5 @@
+package com.bondiano.klisp
+
 import arrow.core.Either
 import arrow.core.raise.either
 import arrow.core.raise.ensure
@@ -14,7 +16,7 @@ fun expand(value: Value, env: Environment): ExpandResult = either {
             if (value.head is Value.Symbol) {
                 val maybeMacro = env.get(value.head.name)
                 if (maybeMacro is Value.Macro) {
-                    val args = consToList(value.tail)
+                    val args = value.tail.toList()
                     val expanded = expandMacro(maybeMacro, args).bind()
                     return@either expand(expanded, env).bind()
                 }
@@ -84,14 +86,4 @@ private fun substitute(expr: Value, substitutions: Map<String, Value>): ExpandRe
 
 private fun cons(head: Value, tail: Value): Value = Value.Cons(head, tail)
 
-private fun consToList(value: Value): List<Value> {
-    val result = mutableListOf<Value>()
-    var current = value
-
-    while (current is Value.Cons) {
-        result.add(current.head)
-        current = current.tail
-    }
-
-    return result
-}
+// Removed: consToList is now a Value extension function in Value.kt

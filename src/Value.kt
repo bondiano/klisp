@@ -1,3 +1,5 @@
+package com.bondiano.klisp
+
 enum class SpecialForm {
     ADD, SUB, MUL, DIV, MOD, EQ, GT, LT, POW, STR_CONCAT,
     IF, SET, PRINT, READ, LAMBDA, DO, LOAD, RAISE,
@@ -142,4 +144,17 @@ private fun Value.Cons.toPrintingStringRecursive(): String = when (tail) {
 fun Value.show(): String = when (this) {
     is Value.Str -> "\"$text\""
     else -> toPrintingString()
+}
+
+fun Value.toList(): List<Value> {
+    val result = mutableListOf<Value>()
+    var current = this
+
+    while (current is Value.Cons) {
+        result.add(current.head)
+        current = current.tail
+    }
+
+    require(current == Value.Nil) { "Improper list: expected Nil, got ${current.toPrintingString()}" }
+    return result
 }

@@ -1,3 +1,5 @@
+package com.bondiano.klisp
+
 sealed class Trampoline<out A> {
     /**
      * A finished computation - recursion has terminated

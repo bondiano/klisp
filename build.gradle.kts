@@ -1,5 +1,7 @@
 plugins {
     kotlin("jvm") version "2.2.21"
+    kotlin("plugin.allopen") version "2.2.21"
+    id("org.jetbrains.kotlinx.benchmark") version "0.4.14"
     application
 }
 
@@ -20,6 +22,8 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-benchmark-runtime:0.4.14")
 }
 
 kotlin {
@@ -38,10 +42,18 @@ sourceSets {
     test {
         kotlin.srcDirs("test")
     }
+
+    val main by getting
+
+    create("benchmark") {
+        kotlin.srcDirs("benchmark")
+        compileClasspath += main.output + main.compileClasspath
+        runtimeClasspath += main.output + main.runtimeClasspath
+    }
 }
 
 application {
-    mainClass.set("MainKt")
+    mainClass.set("com.bondiano.klisp.MainKt")
 }
 
 tasks.named<JavaExec>("run") {
@@ -65,9 +77,42 @@ tasks {
 
     jar {
         manifest {
-            attributes["Main-Class"] = "MainKt"
+            attributes["Main-Class"] = "com.bondiano.klisp.MainKt"
         }
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
         from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
+    }
+}
+
+// All-open plugin configuration - required for JMH benchmarks
+// JMH needs to subclass benchmark classes, so they must be open
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
+}
+
+benchmark {
+    targets {
+        register("benchmark")
+    }
+
+    configurations {
+        named("main") {
+            warmups = 10
+            iterations = 10
+            iterationTime = 1
+            iterationTimeUnit = "s"
+            outputTimeUnit = "ms"
+            // Increase stack size to 10MB to handle deep recursion
+            param("jvmArgs", "-Xss10m")
+        }
+        register("smoke") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            outputTimeUnit = "ms"
+            // Increase stack size to 10MB to handle deep recursion
+            param("jvmArgs", "-Xss10m")
+        }
     }
 }

@@ -1,3 +1,5 @@
+package com.bondiano.klisp
+
 import org.jline.reader.LineReaderBuilder
 import org.jline.reader.EndOfFileException
 import org.jline.reader.UserInterruptException
