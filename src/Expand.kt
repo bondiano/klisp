@@ -26,6 +26,7 @@ fun expand(value: Value, env: Environment): ExpandResult = either {
             val expandedTail = expandList(value.tail, env).bind()
             cons(expandedHead, expandedTail)
         }
+
         else -> value
     }
 }
@@ -38,6 +39,7 @@ private fun expandList(list: Value, env: Environment): ExpandResult = either {
             val expandedTail = expandList(list.tail, env).bind()
             cons(expandedHead, expandedTail)
         }
+
         else -> list
     }
 }
@@ -80,10 +82,9 @@ private fun substitute(expr: Value, substitutions: Map<String, Value>): ExpandRe
             val newTail = substitute(expr.tail, substitutions).bind()
             cons(newHead, newTail)
         }
+
         else -> expr
     }
 }
 
 private fun cons(head: Value, tail: Value): Value = Value.Cons(head, tail)
-
-// Removed: consToList is now a Value extension function in Value.kt

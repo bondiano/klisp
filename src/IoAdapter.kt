@@ -77,8 +77,7 @@ class StdioAdapter : IoAdapter {
  * Provides input from a list of strings and collects output in a string buffer
  */
 class StringIoAdapter(
-    private val input: MutableList<String> = mutableListOf(),
-    private val output: StringBuilder = StringBuilder()
+    private val input: MutableList<String> = mutableListOf(), private val output: StringBuilder = StringBuilder()
 ) : IoAdapter {
     private var inputPosition = 0
 
@@ -115,7 +114,6 @@ class StringIoAdapter(
         /**
          * Create an adapter with input
          */
-        fun withInput(vararg lines: String): StringIoAdapter =
-            StringIoAdapter(lines.toMutableList(), StringBuilder())
+        fun withInput(vararg lines: String): StringIoAdapter = StringIoAdapter(lines.toMutableList(), StringBuilder())
     }
 }

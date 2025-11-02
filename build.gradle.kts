@@ -14,6 +14,7 @@ repositories {
 
 dependencies {
     implementation(kotlin("stdlib"))
+    implementation(kotlin("reflect"))
     implementation("com.github.ajalt.clikt:clikt:5.0.1")
     implementation("org.jline:jline:3.27.1")
     implementation("io.arrow-kt:arrow-core:2.1.0")
@@ -45,10 +46,15 @@ sourceSets {
 
     val main by getting
 
-    create("benchmark") {
+    @Suppress("unused") val benchmark by creating {
         kotlin.srcDirs("benchmark")
-        compileClasspath += main.output + main.compileClasspath
-        runtimeClasspath += main.output + main.runtimeClasspath
+
+        val mainOutput = main.output
+        val mainCompileClasspath = main.compileClasspath
+        val mainRuntimeClasspath = main.runtimeClasspath
+
+        compileClasspath += mainOutput + mainCompileClasspath
+        runtimeClasspath += mainOutput + mainRuntimeClasspath
     }
 }
 

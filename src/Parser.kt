@@ -17,6 +17,7 @@ fun parse(input: String): ParseResult = either {
             val (quotedValue, rest) = parse(cleanInput.drop(1)).bind()
             Value.Cons(Value.Builtin(SpecialForm.QUOTE), Value.Cons(quotedValue, Value.Nil)) to rest
         }
+
         else -> parseAtom(cleanInput).bind()
     }
 }
@@ -80,8 +81,44 @@ private fun parseList(input: String): ParseResult = either {
 
     ensure(rest.isNotEmpty()) { KlispError.ParseError("Unexpected end of input, expected ')'") }
 
-    val result = items.foldRight(Value.Nil as Value) { item, acc ->
-        Value.Cons(item, acc)
+    // Transform (.method ...) to (. method ...)
+    // Transform (.-field ...) to (.- field ...)
+    // Transform (. method ...) where "." is Symbol to Builtin
+    // BUT: Don't transform (. rest) - it's variadic lambda params
+    val result = if (items.isNotEmpty() && items[0] is Value.Symbol) {
+        val symbol = items[0] as Value.Symbol
+        when {
+            symbol.name == "." && items.size > 2 -> {
+                // (. method obj args...) -> Replace Symbol(".") with Builtin(DOT)
+                // Only if there are at least 2 more elements (method and object)
+                val transformed = listOf(Value.Builtin(SpecialForm.DOT)) + items.drop(1)
+                transformed.foldRight(Value.Nil as Value) { item, acc -> Value.Cons(item, acc) }
+            }
+
+            symbol.name == ".-" && items.size > 2 -> {
+                // (.- field obj) -> Replace Symbol(".-") with Builtin(DOT_FIELD)
+                val transformed = listOf(Value.Builtin(SpecialForm.DOT_FIELD)) + items.drop(1)
+                transformed.foldRight(Value.Nil as Value) { item, acc -> Value.Cons(item, acc) }
+            }
+
+            symbol.name.startsWith(".-") && symbol.name.length > 2 -> {
+                // (.-field obj) -> (.- field obj)
+                val fieldName = symbol.name.drop(2)
+                val transformed = listOf(Value.Builtin(SpecialForm.DOT_FIELD), Value.Symbol(fieldName)) + items.drop(1)
+                transformed.foldRight(Value.Nil as Value) { item, acc -> Value.Cons(item, acc) }
+            }
+
+            symbol.name.startsWith(".") && symbol.name.length > 1 && symbol.name != ".-" -> {
+                // (.method obj args...) -> (. method obj args...)
+                val methodName = symbol.name.drop(1)
+                val transformed = listOf(Value.Builtin(SpecialForm.DOT), Value.Symbol(methodName)) + items.drop(1)
+                transformed.foldRight(Value.Nil as Value) { item, acc -> Value.Cons(item, acc) }
+            }
+
+            else -> items.foldRight(Value.Nil as Value) { item, acc -> Value.Cons(item, acc) }
+        }
+    } else {
+        items.foldRight(Value.Nil as Value) { item, acc -> Value.Cons(item, acc) }
     }
 
     result to rest.drop(1)
@@ -96,6 +133,7 @@ private fun skipWhiteSpacesAndComments(input: String): String {
                 rest = rest.dropWhile { it != '\n' }
                 if (rest.isNotEmpty()) rest = rest.drop(1)
             }
+
             else -> break
         }
     }
@@ -104,5 +142,4 @@ private fun skipWhiteSpacesAndComments(input: String): String {
 
 private val delimiters = setOf('(', ')', ' ', '\n', '\t', ';', '\'', '`', ',')
 
-private fun takeUntilDelimiter(input: String): String =
-    input.takeWhile { it !in delimiters }
+private fun takeUntilDelimiter(input: String): String = input.takeWhile { it !in delimiters }

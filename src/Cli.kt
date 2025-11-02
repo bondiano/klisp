@@ -59,21 +59,15 @@ class RunCommand : CliktCommand(
 
         when {
             evalExpr != null -> {
-                parse(evalExpr!!).fold(
-                    ifLeft = { error ->
+                parse(evalExpr!!).fold(ifLeft = { error ->
+                    echo("${errorType(error)}: ${error.message}", err = true)
+                    throw ProgramResult(1)
+                }, ifRight = { (value, _) ->
+                    eval(value, env).fold(ifLeft = { error ->
                         echo("${errorType(error)}: ${error.message}", err = true)
                         throw ProgramResult(1)
-                    },
-                    ifRight = { (value, _) ->
-                        eval(value, env).fold(
-                            ifLeft = { error ->
-                                echo("${errorType(error)}: ${error.message}", err = true)
-                                throw ProgramResult(1)
-                            },
-                            ifRight = { result -> println(result.show()) }
-                        )
-                    }
-                )
+                    }, ifRight = { result -> println(result.show()) })
+                })
             }
 
             file != null -> runFile(file!!, env)
@@ -91,24 +85,18 @@ class RunCommand : CliktCommand(
             var remaining = content
 
             while (remaining.trim().isNotEmpty()) {
-                parse(remaining).fold(
-                    ifLeft = { error ->
+                parse(remaining).fold(ifLeft = { error ->
+                    echo("${errorType(error)}: ${error.message}", err = true)
+                    throw ProgramResult(1)
+                }, ifRight = { (value, rest) ->
+                    eval(value, env).fold(ifLeft = { error ->
                         echo("${errorType(error)}: ${error.message}", err = true)
                         throw ProgramResult(1)
-                    },
-                    ifRight = { (value, rest) ->
-                        eval(value, env).fold(
-                            ifLeft = { error ->
-                                echo("${errorType(error)}: ${error.message}", err = true)
-                                throw ProgramResult(1)
-                            },
-                            ifRight = { result ->
-                                println(result.show())
-                                remaining = rest
-                            }
-                        )
-                    }
-                )
+                    }, ifRight = { result ->
+                        println(result.show())
+                        remaining = rest
+                    })
+                })
             }
         } catch (_: java.io.FileNotFoundException) {
             echo("File not found: $file", err = true)
@@ -119,8 +107,7 @@ class RunCommand : CliktCommand(
 
 fun configureCli(): Klisp {
     return Klisp().subcommands(
-        ReplCommand(),
-        RunCommand()
+        ReplCommand(), RunCommand()
     )
 }
 

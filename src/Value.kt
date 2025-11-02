@@ -4,7 +4,8 @@ enum class SpecialForm {
     ADD, SUB, MUL, DIV, MOD, EQ, GT, LT, POW, STR_CONCAT,
     IF, SET, PRINT, READ, LAMBDA, DO, LOAD, RAISE,
     MACRO, EXPAND_MACRO, QUOTE, DEFINE, SYMBOL,
-    CAR, CDR, CONS, TYPE_OF, EVAL;
+    CAR, CDR, CONS, TYPE_OF, EVAL,
+    NEW, DOT, DOT_FIELD;
 
     companion object {
         fun fromString(value: String): SpecialForm? = when (value) {
@@ -36,6 +37,7 @@ enum class SpecialForm {
             "cons" -> CONS
             "type-of" -> TYPE_OF
             "eval" -> EVAL
+            "new" -> NEW
             else -> null
         }
     }
@@ -70,6 +72,9 @@ fun SpecialForm.toPrintingString(): String = when (this) {
     SpecialForm.CONS -> "cons"
     SpecialForm.TYPE_OF -> "type-of"
     SpecialForm.EVAL -> "eval"
+    SpecialForm.NEW -> "new"
+    SpecialForm.DOT -> "."
+    SpecialForm.DOT_FIELD -> ".-"
 }
 
 sealed class Value {
@@ -91,6 +96,8 @@ sealed class Value {
     ) : Value()
     data class Builtin(val specialForm: SpecialForm) : Value()
     data class Cons(val head: Value, val tail: Value) : Value()
+    data class JavaObject(val obj: Any) : Value()
+    data class JavaClass(val clazz: Class<*>) : Value()
     object Nil : Value()
 
     companion object {
@@ -119,6 +126,8 @@ fun Value.toPrintingString(): String = when (this) {
     is Value.Lambda -> "(lambda (${formatParameters(parameters, variadicParam)}) ${body.toPrintingString()})"
     is Value.Macro -> "(macro (${formatParameters(parameters, variadicParam)}) ${body.toPrintingString()})"
     is Value.Cons -> "(${toPrintingStringRecursive()})"
+    is Value.JavaObject -> obj.toString()
+    is Value.JavaClass -> clazz.name
     is Value.Nil -> "nil"
 }
 

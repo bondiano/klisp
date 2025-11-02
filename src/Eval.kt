@@ -1,6 +1,7 @@
 package com.bondiano.klisp
 
 import arrow.core.Either
+import arrow.core.getOrElse
 import arrow.core.raise.either
 import arrow.core.raise.ensure
 import kotlin.math.pow
@@ -27,10 +28,6 @@ private fun evalExpanded(value: Value, env: Environment): EvalResult = either {
     evalExpandedTrampoline(value, env).bind().run()
 }
 
-/**
- * Internal evaluation of expanded form returning Trampoline
- * This is where tail call optimization happens
- */
 private fun evalExpandedTrampoline(value: Value, env: Environment): TrampolineResult = either {
     when (value) {
         is Value.Integer, is Value.Float, is Value.Str, is Value.Bool, Value.Nil ->
@@ -39,6 +36,8 @@ private fun evalExpandedTrampoline(value: Value, env: Environment): TrampolineRe
         is Value.Builtin -> done(value)
         is Value.Lambda -> done(value)
         is Value.Macro -> done(value)
+        is Value.JavaObject -> done(value)
+        is Value.JavaClass -> done(value)
 
         is Value.Symbol -> {
             val resolved = env.get(value.name)
@@ -63,10 +62,6 @@ private fun evalExpandedTrampoline(value: Value, env: Environment): TrampolineRe
     }
 }
 
-/**
- * Apply builtin special form with trampoline support
- * Forms with tail positions (IF, DO) use special trampoline versions
- */
 private fun applyBuiltinTrampoline(
     form: SpecialForm,
     args: List<Value>,
@@ -111,6 +106,10 @@ private fun applyBuiltinTrampoline(
 
         SpecialForm.PRINT -> done(evalPrint(args, env).bind())
         SpecialForm.READ -> done(evalRead(env).bind())
+
+        SpecialForm.NEW -> done(evalNew(args, env).bind())
+        SpecialForm.DOT -> done(evalDot(args, env).bind())
+        SpecialForm.DOT_FIELD -> done(evalDotField(args, env).bind())
 
         else -> raise(KlispError.EvalError("Special form not yet implemented: ${form.toPrintingString()}"))
     }
@@ -488,6 +487,8 @@ private fun evalTypeOf(args: List<Value>, env: Environment): EvalResult = either
         is Value.Macro -> "macro"
         is Value.Builtin -> "builtin"
         is Value.Cons -> "list"
+        is Value.JavaObject -> "java-object"
+        is Value.JavaClass -> "java-class"
         Value.Nil -> "nil"
     }
     Value.Str(typeName)
@@ -519,7 +520,93 @@ private fun evalRead(env: Environment): EvalResult = either {
     parsedValue
 }
 
-// Removed: consToList is now a Value extension function in Value.kt
+private fun evalNew(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.isNotEmpty()) { KlispError.EvalError("new expects at least 1 argument (class name)") }
+
+    val clazz = when (val classValue = args[0]) {
+        is Value.Symbol -> resolveClass(classValue.name).bind()
+        else -> raise(KlispError.EvalError("new expects class name symbol (e.g., java.util.ArrayList), got ${classValue.toPrintingString()}"))
+    }
+
+    val constructorArgs = args.drop(1).map { arg ->
+        val evaluated = evalExpanded(arg, env).bind()
+        valueToJava(evaluated)
+    }
+
+    val instance = createInstanceWithKotlinReflect(clazz, constructorArgs).getOrElse {
+        createInstance(clazz, constructorArgs).bind()
+    }
+
+    Value.JavaObject(instance)
+}
+
+private fun evalDot(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size >= 2) { KlispError.EvalError(". expects at least 2 arguments (method name and object)") }
+
+    val methodName = when (val methodValue = args[0]) {
+        is Value.Symbol -> methodValue.name
+        is Value.Str -> methodValue.text
+        else -> raise(KlispError.EvalError(". expects method name as symbol or string, got ${methodValue.toPrintingString()}"))
+    }
+
+    val targetValue = evalExpanded(args[1], env).bind()
+
+    val methodArgs = args.drop(2).map { arg ->
+        val evaluated = evalExpanded(arg, env).bind()
+        valueToJava(evaluated)
+    }
+
+    val result = when (targetValue) {
+        is Value.JavaClass ->
+            invokeCompanionMethod(targetValue.clazz, methodName, methodArgs).bind()
+
+        else -> {
+            val target = when (targetValue) {
+                is Value.JavaObject -> targetValue.obj
+                is Value.Str -> targetValue.text
+                is Value.Integer -> targetValue.value
+                is Value.Float -> targetValue.value
+                is Value.Bool -> targetValue.value
+                else -> raise(KlispError.EvalError(". expects object or class, got ${targetValue.toPrintingString()}"))
+            }
+
+            val methodResult = invokeMethodWithKotlinReflect(target, methodName, methodArgs)
+            methodResult.mapLeft { error ->
+                    ensure(error.message.contains("not found", ignoreCase = true)) { error }
+                    invokeExtensionFunction(target, methodName, methodArgs).bind()
+                }
+        }
+    }
+
+    javaToValue(result)
+}
+
+private fun evalDotField(args: List<Value>, env: Environment): EvalResult = either {
+    ensure(args.size == 2) { KlispError.EvalError(".- expects exactly 2 arguments (field name and object)") }
+
+    val fieldName = when (val fieldValue = args[0]) {
+        is Value.Symbol -> fieldValue.name
+        is Value.Str -> fieldValue.text
+        else -> raise(KlispError.EvalError(".- expects field name as symbol or string, got ${fieldValue.toPrintingString()}"))
+    }
+
+    val result = when (val targetValue = evalExpanded(args[1], env).bind()) {
+        is Value.JavaClass -> {
+            getCompanionProperty(targetValue.clazz, fieldName).bind()
+        }
+
+        else -> {
+            val target = when (targetValue) {
+                is Value.JavaObject -> targetValue.obj
+                else -> raise(KlispError.EvalError(".- expects object or class, got ${targetValue.toPrintingString()}"))
+            }
+
+            getPropertyWithKotlinReflect(target, fieldName).bind()
+        }
+    }
+
+    javaToValue(result)
+}
 
 private fun toDoubleOrRaise(value: Value): Either<KlispError.EvalError, Double> = either {
     when (value) {
